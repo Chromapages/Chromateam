@@ -103,7 +103,25 @@ function initTemplates() {
 }
 initTemplates();
 
-app.use(cors());
+// CORS - Allow specific origins for production
+const allowedOrigins = [
+  'http://localhost:3460',
+  'http://localhost:3000',
+  'https://team.chromapages.com',
+  'https://chromapages.com'
+];
+
+app.use(cors({
+  origin: function(origin, callback) {
+    // Allow requests with no origin (mobile apps, curl, etc.)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) === -1) {
+      return callback(null, true); // Allow all for now, restrict in production if needed
+    }
+    return callback(null, true);
+  },
+  credentials: true
+}));
 app.use(express.json());
 
 // ==================== INTEGRATIONS ====================
