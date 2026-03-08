@@ -1,0 +1,17 @@
+{
+  "name": "agent-handoff-manager",
+  "version": "1.0.0",
+  "description": "Agent Handoff Manager for Chromapages",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "discord.js": "^14.25.1",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "multer": "^2.1.1",
+    "ws": "^8.18.0"
+  }
+}
