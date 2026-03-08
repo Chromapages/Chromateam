@@ -49,8 +49,9 @@ export default function TimelinePage() {
     });
   }, []);
 
-  // Connect to WebSocket
-  useWebSocket('ws://localhost:3461', handleWebSocketMessage);
+  // Connect to WebSocket - use env var or default to localhost
+  const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3461';
+  useWebSocket(wsUrl, handleWebSocketMessage);
 
   // Initial load only
   useEffect(() => {

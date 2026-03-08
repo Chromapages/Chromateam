@@ -1235,52 +1235,84 @@ function getTaskSuffix(handoff) {
   return `\n\n📁 IMPORTANT: Save any files, research, code, or deliverables to:\n${outputPath}\n\nIf you create any files, note the file paths in your response so they can be retrieved.`;
 }
 
-function invokeOpenClawAgent(agentId, task, context, handoff) {
-  return new Promise((resolve, reject) => {
-    const openClawAgentId = AGENT_ID_MAP[agentId];
-    if (!openClawAgentId) {
-      return reject(new Error(`Unknown agent: ${agentId}`));
+// Agent endpoint - URL to call agents on local device
+const LOCAL_AGENT_ENDPOINT = process.env.LOCAL_AGENT_ENDPOINT || 'http://localhost:3001/agent';
+
+// Mode: 'local_http' (call local agents via HTTP) or 'openclaw' (use CLI)
+const AGENT_MODE = process.env.AGENT_MODE || 'openclaw';
+
+async function invokeOpenClawAgent(agentId, task, context, handoff) {
+  const openClawAgentId = AGENT_ID_MAP[agentId];
+  if (!openClawAgentId) {
+    throw new Error(`Unknown agent: ${agentId}`);
+  }
+
+  // Build the task prompt with context and output instructions
+  let fullTask = context 
+    ? `${task}\n\nContext: ${context}`
+    : task;
+  
+  // Add output directory instructions
+  fullTask += getTaskSuffix(handoff);
+
+  console.log(`🤖 Invoking agent: ${openClawAgentId}`);
+  console.log(`   Mode: ${AGENT_MODE}`);
+  console.log(`   Task: ${fullTask.substring(0, 100)}...`);
+
+  if (AGENT_MODE === 'local_http') {
+    // Call local agents via HTTP API
+    try {
+      const response = await fetch(`${LOCAL_AGENT_ENDPOINT}/${openClawAgentId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          task: fullTask,
+          agentId: openClawAgentId,
+          handoffId: handoff.id,
+          pipelineId: handoff.pipelineId
+        }),
+        timeout: 300000 // 5 minute timeout
+      });
+
+      if (!response.ok) {
+        throw new Error(`Agent API error: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log(`✅ Agent ${openClawAgentId} responded via HTTP`);
+      return result;
+    } catch (error) {
+      console.error(`❌ Agent HTTP call failed:`, error.message);
+      throw error;
     }
-
-    // Build the task prompt with context and output instructions
-    let fullTask = context 
-      ? `${task}\n\nContext: ${context}`
-      : task;
-    
-    // Add output directory instructions
-    fullTask += getTaskSuffix(handoff);
-
-    console.log(`🤖 Invoking OpenClaw agent: ${openClawAgentId}`);
-    console.log(`   Task: ${fullTask.substring(0, 100)}...`);
-
-    // Escape the task for shell
-    const escapedTask = fullTask.replace(/"/g, '\\"');
-    
-    // Use OpenClaw CLI to invoke the agent
-    // --json flag for machine-readable output
-    // --timeout 300 for 5 minute timeout
-    const cmd = `openclaw agent --agent ${openClawAgentId} --message "${escapedTask}" --json --timeout 300`;
-
-    exec(cmd, { timeout: 360000 }, (error, stdout, stderr) => {
-      if (error) {
-        console.error(`❌ OpenClaw CLI error:`, error.message);
-        return reject(new Error(`OpenClaw CLI error: ${error.message}`));
-      }
+  } else {
+    // Legacy: Use OpenClaw CLI (for backward compatibility)
+    return new Promise((resolve, reject) => {
+      // Escape the task for shell
+      const escapedTask = fullTask.replace(/"/g, '\\"');
       
-      if (stderr) {
-        console.log(`⚠️ OpenClaw stderr:`, stderr);
-      }
+      const cmd = `openclaw agent --agent ${openClawAgentId} --message "${escapedTask}" --json --timeout 300`;
 
-      try {
-        const result = stdout ? JSON.parse(stdout) : { message: 'Completed' };
-        console.log(`✅ OpenClaw agent ${openClawAgentId} responded`);
-        resolve(result);
-      } catch (parseErr) {
-        // If JSON parse fails, just return the stdout as message
-        resolve({ message: stdout || 'Completed', raw: true });
-      }
+      exec(cmd, { timeout: 360000 }, (error, stdout, stderr) => {
+        if (error) {
+          console.error(`❌ OpenClaw CLI error:`, error.message);
+          return reject(new Error(`OpenClaw CLI error: ${error.message}`));
+        }
+        
+        if (stderr) {
+          console.log(`⚠️ OpenClaw stderr:`, stderr);
+        }
+
+        try {
+          const result = stdout ? JSON.parse(stdout) : { message: 'Completed' };
+          console.log(`✅ OpenClaw agent ${openClawAgentId} responded`);
+          resolve(result);
+        } catch (parseErr) {
+          resolve({ message: stdout || 'Completed', raw: true });
+        }
+      });
     });
-  });
+  }
 }
 
 async function processHandoff(handoff) {
