@@ -32,9 +32,14 @@ try { envApiUrl = decodeURIComponent(envApiUrl); } catch (e) {}
 const rawApiUrl = envApiUrl
   .replace(/^["']|["']$/g, '')
   .replace(/\/$/, '');
-export const API_BASE = rawApiUrl.endsWith('/api') ? rawApiUrl : `${rawApiUrl}/api`;
-export const API_ORIGIN = rawApiUrl.replace(/\/api$/, '');
-export const WS_BASE = process.env.NEXT_PUBLIC_WS_URL || API_ORIGIN.replace(/^http/, 'ws');
+export const API_BASE = typeof window !== 'undefined' ? '/api' : (rawApiUrl.endsWith('/api') ? rawApiUrl : `${rawApiUrl}/api`);
+export const API_ORIGIN = typeof window !== 'undefined' ? '' : rawApiUrl.replace(/\/api$/, '');
+let envWsUrl = process.env.NEXT_PUBLIC_WS_URL;
+try { if (envWsUrl) envWsUrl = decodeURIComponent(envWsUrl); } catch (e) {}
+envWsUrl = (envWsUrl || '').replace(/^["']|["']$/g, '').replace(/\/$/, '');
+
+export const WS_BASE = envWsUrl || 
+  (typeof window !== 'undefined' ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}` : API_ORIGIN.replace(/^http/, 'ws'));
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
