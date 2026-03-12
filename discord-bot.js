@@ -27,10 +27,40 @@ const client = new Client({
 });
 
 client.on(Events.MessageCreate, async (message) => {
+  console.log(`📬 Message in channel ${message.channelId}: ${message.content.substring(0, 50)}`);
+  
   // Ignore bot messages
   if (message.author.bot) return;
   
   const content = message.content.trim();
+  
+  // Check for agent mentions and trigger reaction on office page
+  const agentMentions = ['chroma', 'bender', 'pixel', 'canvas', 'flux', 'prism', 'lumen', 'momentum', 'glyph', 'chief'];
+  const mentionedAgents = agentMentions.filter(agent => 
+    content.includes(`@${agent}`) || content.includes(`<@${agent}>`)
+  );
+  
+  if (mentionedAgents.length > 0) {
+    const AHM_API = process.env.AHM_URL || 'http://localhost:3461';
+    for (const agentId of mentionedAgents) {
+      try {
+        await fetch(`${AHM_API}/api/discord/mention`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agentId,
+            mentionType: 'ping',
+            message: content.substring(0, 200),
+            channelId: message.channelId,
+            userId: message.author.id
+          })
+        });
+        console.log(`📢 Mentioned agent: ${agentId}`);
+      } catch (err) {
+        console.error(`Failed to notify mention for ${agentId}:`, err.message);
+      }
+    }
+  }
   
   // Check if it's a command
   if (!content.startsWith('!')) return;
@@ -136,5 +166,11 @@ if (!DISCORD_TOKEN) {
   console.error('ERROR: DISCORD_TOKEN not set in .env');
   process.exit(1);
 }
+
+client.on('ready', async () => {
+  console.log(`🤖 Discord Bot logged in as ${client.user.tag}`);
+  console.log(`📡 In ${client.guilds.cache.size} servers:`);
+  client.guilds.cache.forEach(g => console.log(`   - ${g.name} (${g.id})`));
+});
 
 client.login(DISCORD_TOKEN);

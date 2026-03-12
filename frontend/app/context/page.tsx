@@ -1,13 +1,13 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { fetchAgents, fetchAgentContext } from '@/lib/api';
 import { AgentsMap, AgentContextSummary } from '@/lib/types';
 import HandoffMemo from '@/components/HandoffMemo';
 import PageHeader from '@/components/PageHeader';
 
-export default function ContextPage() {
+function ContextPageContent() {
   const searchParams = useSearchParams();
   const initialAgent = searchParams.get('agent') || '';
 
@@ -152,5 +152,13 @@ export default function ContextPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function ContextPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <ContextPageContent />
+    </Suspense>
   );
 }

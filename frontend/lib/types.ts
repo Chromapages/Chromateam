@@ -17,7 +17,7 @@ export interface Handoff {
   decisions: string[];
   nextSteps: string[];
   priority: 'low' | 'medium' | 'high';
-  status: 'pending' | 'completed' | 'in_progress' | 'failed';
+  status: 'pending' | 'completed' | 'in_progress' | 'failed' | 'cancelled';
   createdAt: string;
   completedAt: string | null;
   agentResponse?: string;
@@ -79,16 +79,21 @@ export interface AgentStatus {
 export interface DashboardSummary {
   total: number;
   pending: number;
+  inProgress: number;
   completed: number;
+  failed: number;
   overdue: number;
+  activePipelines: number;
 }
 
 export interface DashboardAgentStats {
   name: string;
+  role: string;
   pending: number;
+  inProgress: number;
   completed: number;
   overdue: number;
-  status: 'busy' | 'working' | 'available';
+  status: 'busy' | 'working' | 'active' | 'available';
 }
 
 export interface DashboardRecentActivity {
@@ -98,11 +103,38 @@ export interface DashboardRecentActivity {
   task: string;
   status: string;
   time: string;
+  pipelineId?: string;
+  pipelineStep?: number;
+}
+
+export interface PipelineStep {
+  id: string;
+  from: string;
+  to: string;
+  task: string;
+  status: string;
+  step: number;
+  createdAt: string;
+  completedAt: string | null;
+  agentResponse?: string;
+}
+
+export interface Pipeline {
+  id: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  createdAt: string;
+  totalSteps: number;
+  completedSteps: number;
+  inProgressSteps: number;
+  pendingSteps: number;
+  failedSteps: number;
+  steps: PipelineStep[];
 }
 
 export interface DashboardData {
   summary: DashboardSummary;
   byAgent: Record<string, DashboardAgentStats>;
+  pipelines: Pipeline[];
   recent: DashboardRecentActivity[];
   templates: string[];
 }
@@ -248,6 +280,7 @@ export interface TemplateExecutePayload {
   task: string;
   context?: string;
   priority?: 'low' | 'medium' | 'high';
+  runAsync?: boolean;
 }
 
 export interface TemplateExecuteResponse {
@@ -255,6 +288,120 @@ export interface TemplateExecuteResponse {
   template: string;
   executed: number;
   results: { handoffId: string }[];
+  pipelineId?: string;
+}
+
+// ==================== NEW BACKEND TYPES ====================
+
+export interface Schedule {
+  id: string;
+  name?: string;
+  type: 'handoff' | 'automation' | 'webhook';
+  task?: string;
+  fromAgent?: string;
+  toAgent?: string;
+  context?: Record<string, unknown>;
+  priority: 'low' | 'medium' | 'high';
+  scheduledAt: string;
+  cron?: string;
+  recurring: boolean;
+  createdAt: number;
+  executions: number;
+  lastRun?: number;
+  lastError?: string;
+  nextRun?: number;
+  automationId?: string;
+  webhookId?: string;
+}
+
+export interface Webhook {
+  id: string;
+  name: string;
+  url: string;
+  events: string[];
+  headers?: Record<string, string>;
+  createdAt: number;
+}
+
+export interface AutomationStep {
+  name: string;
+  type: 'http' | 'request' | 'script' | 'delay' | 'transform' | 'log';
+  url?: string;
+  method?: string;
+  headers?: Record<string, string>;
+  body?: unknown;
+  code?: string;
+  ms?: number;
+  input?: unknown;
+  message?: string;
+}
+
+export interface Automation {
+  id: string;
+  name: string;
+  description?: string;
+  steps: AutomationStep[];
+  context?: Record<string, unknown>;
+  trigger?: string;
+  createdAt: number;
+}
+
+export interface ScheduleCreatePayload {
+  type?: 'handoff' | 'automation' | 'webhook';
+  task?: string;
+  fromAgent?: string;
+  toAgent?: string;
+  context?: Record<string, unknown>;
+  priority?: 'low' | 'medium' | 'high';
+  scheduledAt?: string;
+  cron?: string;
+  name?: string;
+  automationId?: string;
+  webhookId?: string;
+}
+
+export interface ScheduleCreateResponse {
+  success: boolean;
+  scheduleId: string;
+  scheduledFor: string;
+}
+
+export interface WebhookCreatePayload {
+  name: string;
+  url: string;
+  events?: string[];
+  headers?: Record<string, string>;
+}
+
+export interface WebhookCreateResponse {
+  success: boolean;
+  webhookId: string;
+}
+
+export interface WebhookTestResponse {
+  success: boolean;
+  status?: number;
+  error?: string;
+}
+
+export interface AutomationCreatePayload {
+  name: string;
+  description?: string;
+  steps: AutomationStep[];
+  context?: Record<string, unknown>;
+  trigger?: string;
+}
+
+export interface AutomationCreateResponse {
+  success: boolean;
+  automationId: string;
+}
+
+export interface AutomationRunResponse {
+  automationId: string;
+  name: string;
+  executedAt: string;
+  steps: Array<{ step: string; status?: number; ok?: boolean; result?: unknown; error?: string; waited?: number; logged?: string }>;
 }
 
 export const AGENT_COLORS: Record<string, string> = {

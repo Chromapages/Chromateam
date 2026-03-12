@@ -8,9 +8,10 @@ const NAV_ITEMS = [
   { href: '/', label: 'Dashboard' },
   { href: '/workspace', label: 'Workspace' },
   { href: '/create', label: 'Create Handoff' },
-  { href: '/templates', label: 'Templates' },
   { href: '/context', label: 'Agent Context' },
-  { href: '/timeline', label: 'Timeline' },
+  { href: '/automations', label: 'Operations' },
+  { href: '/board', label: 'Board' },
+  { href: '/office', label: 'Office' },
 ];
 
 export default function Navbar() {
@@ -33,7 +34,7 @@ export default function Navbar() {
             <Link
               key={item.href}
               href={item.href}
-              className={`block py-2.5 text-xs uppercase tracking-widest transition-all duration-150 relative ${isActive ? 'pl-3 text-[#1B4FD8] font-medium' : 'text-[#6B6B6B] hover:text-[#1A1A1A]'}`}
+              className={`block py-2.5 text-xs uppercase tracking-widest transition-all duration-150 relative ${isActive ? 'pl-3 text-[#1B4FD8] font-medium' : 'text-[#6B6B6B] hover:text-[#1A1A1A] dark:hover:text-[#FAFAF8]'}`}
             >
               {item.label}
               {isActive && (
@@ -47,7 +48,8 @@ export default function Navbar() {
       <div className="px-5 py-4 border-t border-[#E4E2DC]">
         <button
           onClick={toggleTheme}
-          className="w-full flex items-center justify-between px-3 py-2 rounded text-xs uppercase tracking-widest text-[#6B6B6B] hover:text-[#1A1A1A] hover:bg-[#F5F5F3] transition-all duration-150"
+          aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+          className="w-full flex items-center justify-between px-3 py-2 rounded text-xs uppercase tracking-widest text-[#6B6B6B] hover:text-[#1A1A1A] dark:hover:text-[#FAFAF8] hover:bg-[#F5F5F3] dark:hover:bg-[#2A2A2A] transition-all duration-150"
         >
           <span>{theme === 'light' ? 'Dark Mode' : 'Light Mode'}</span>
           {theme === 'light' ? (

@@ -30,8 +30,8 @@
     --bg-secondary: #F5F5F3;
     --bg-tertiary: #E4E2DC;
     --text-primary: #1A1A1A;
-    --text-secondary: #A8A49E;
-    --text-tertiary: #6B6B6B;
+    --text-secondary: #6B6B6B;
+    --text-tertiary: #9CA3AF;
     --border-color: #E4E2DC;
     --border-strong: #D1CFC8;
   }
@@ -71,7 +71,7 @@
   }
 
   .input-field {
-    @apply w-full bg-transparent border border-[#E4E2DC] focus:border-[#1B4FD8] focus:outline-none transition-all duration-200 px-3 py-2.5 text-[#1A1A1A] placeholder:text-[#A8A49E] rounded-lg;
+    @apply w-full bg-transparent border border-[#E4E2DC] focus:border-[#1B4FD8] focus:outline-none focus:ring-2 focus:ring-[#1B4FD8]/20 transition-all duration-200 px-3 py-2.5 text-[#1A1A1A] placeholder:text-[#9CA3AF] rounded-lg;
   }
 
   .dark .input-field {
@@ -83,11 +83,11 @@
   }
 
   .btn-primary {
-    @apply w-full py-3 px-4 bg-[#1B4FD8] text-white font-medium uppercase tracking-widest text-sm hover:bg-[#3B64DD] transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg shadow-sm hover:shadow;
+    @apply w-full py-3 px-4 bg-[#1B4FD8] text-white font-medium uppercase tracking-widest text-sm hover:bg-[#3B64DD] transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg shadow-sm hover:shadow focus-visible:ring-2 focus-visible:ring-[#1B4FD8] focus-visible:ring-offset-2 focus-visible:outline-none;
   }
 
   .btn-ghost {
-    @apply px-4 py-2 text-[#6B6B6B] hover:text-[#1A1A1A] hover:bg-[#F5F5F3] transition-all duration-200 rounded-md;
+    @apply px-4 py-2 text-[#6B6B6B] hover:text-[#1A1A1A] hover:bg-[#F5F5F3] transition-all duration-200 rounded-md focus-visible:ring-2 focus-visible:ring-[#1B4FD8] focus-visible:ring-offset-2 focus-visible:outline-none;
   }
 
   .dark .btn-ghost {
@@ -95,7 +95,7 @@
   }
 
   .btn-secondary {
-    @apply px-4 py-2 border border-[#E4E2DC] text-[#1A1A1A] text-xs uppercase tracking-widest hover:bg-[#F5F5F3] hover:border-[#1A1A1A] transition-all duration-200 rounded-md;
+    @apply px-4 py-2 border border-[#E4E2DC] text-[#1A1A1A] text-xs uppercase tracking-widest hover:bg-[#F5F5F3] hover:border-[#1A1A1A] transition-all duration-200 rounded-md focus-visible:ring-2 focus-visible:ring-[#1B4FD8] focus-visible:ring-offset-2 focus-visible:outline-none;
   }
 
   .dark .btn-secondary {

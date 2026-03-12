@@ -1,12 +1,18 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { fetchAgents, createHandoff, createPipeline } from '@/lib/api';
-import { AgentsMap, CreateHandoffPayload } from '@/lib/types';
+import { fetchAgents, createHandoff, createPipeline, fetchTemplates, executeTemplate } from '@/lib/api';
+import { AgentsMap, CreateHandoffPayload, type Template } from '@/lib/types';
 import PageHeader from '@/components/PageHeader';
-import { GitBranch, ArrowRight, Plus, X, ChevronUp, ChevronDown } from 'lucide-react';
+import { GitBranch, ArrowRight, Plus, X, ChevronUp, ChevronDown, Play, Loader2, FileCode } from 'lucide-react';
+import { CreateHandoffSchema, type CreateHandoffInput } from '@/lib/validation';
 
-type Mode = 'single' | 'pipeline';
+type Mode = 'single' | 'pipeline' | 'templates';
+
+interface LocalTemplate extends Template {
+  key: string;
+  stepCount: number;
+}
 
 export default function CreateHandoffPage() {
   const [agents, setAgents] = useState<AgentsMap>({});
@@ -28,10 +34,89 @@ export default function CreateHandoffPage() {
 
   // Pipeline mode state
   const [pipelineAgents, setPipelineAgents] = useState<string[]>([]);
+  const [pipelineMode, setPipelineMode] = useState<'sequential' | 'parallel'>('sequential');
+
+  // Delegate mode state (for sub-agents)
+  const [delegateMode, setDelegateMode] = useState(false);
+
+  // Templates mode state
+  const [templates, setTemplates] = useState<LocalTemplate[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [executing, setExecuting] = useState<string | null>(null);
+  const [templateTask, setTemplateTask] = useState('');
+  const [templateContext, setTemplateContext] = useState('');
+  const [templatePriority, setTemplatePriority] = useState<'low' | 'medium' | 'high'>('medium');
+  const [runMode, setRunMode] = useState<'async' | 'sequential'>('async');
+  const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
 
   useEffect(() => {
     fetchAgents().then(setAgents).catch(console.error);
   }, []);
+
+  // Load templates when mode changes to templates
+  useEffect(() => {
+    if (mode === 'templates' && templates.length === 0) {
+      setTemplatesLoading(true);
+      fetchTemplates()
+        .then(data => setTemplates(data))
+        .catch(() => setTemplatesLoading(false))
+        .finally(() => setTemplatesLoading(false));
+    }
+  }, [mode, templates.length]);
+
+  // Helper: Identify parent agents and their sub-agents
+  const PARENT_AGENTS = ['bender', 'prism'];
+  const SUB_AGENTS: Record<string, string[]> = {
+    bender: ['frontend-dev', 'backend-dev', 'code-reviewer', 'qa-tester', 'mobile-dev'],
+    prism: ['market-researcher', 'competitor-analyst']
+  };
+  
+  const isParentAgent = (agentId: string) => PARENT_AGENTS.includes(agentId);
+  const getSubAgents = (parentId: string) => SUB_AGENTS[parentId] || [];
+  const getParentOfSubAgent = (agentId: string): string | null => {
+    for (const parent of PARENT_AGENTS) {
+      if (SUB_AGENTS[parent]?.includes(agentId)) return parent;
+    }
+    return null;
+  };
+
+  // Execute template
+  const executeTemplateHandler = async (templateKey: string) => {
+    if (!templateTask.trim()) {
+      setFeedback({ type: 'error', message: 'Please enter a task' });
+      return;
+    }
+
+    setExecuting(templateKey);
+    setFeedback(null);
+    try {
+      const data = await executeTemplate(templateKey, {
+        task: templateTask,
+        context: templateContext,
+        priority: templatePriority,
+        runAsync: runMode === 'async'
+      });
+      
+      if (runMode === 'sequential') {
+        setFeedback({
+          type: 'success',
+          message: `Sequential pipeline started! Pipeline ID: ${data.pipelineId}`
+        });
+      } else {
+        setFeedback({
+          type: 'success',
+          message: `Template executed! Created ${data.executed} handoffs`
+        });
+      }
+      setTemplateTask('');
+      setTemplateContext('');
+      setSelectedTemplate(null);
+    } catch {
+      setFeedback({ type: 'error', message: 'Failed to execute template' });
+    } finally {
+      setExecuting(null);
+    }
+  };
 
   // Pipeline helpers
   const addToPipeline = (agentId: string) => {
@@ -101,10 +186,13 @@ export default function CreateHandoffPage() {
           task,
           context,
           priority,
+          runMode: pipelineMode,
         });
         setFeedback({
           type: 'success',
-          message: `Pipeline created: ${result.steps} steps, ID: ${result.pipelineId}`,
+          message: pipelineMode === 'parallel' 
+            ? `Parallel pipeline created: ${pipelineAgents.length} agents working simultaneously`
+            : `Pipeline created: ${result.steps} steps, ID: ${result.pipelineId}`,
         });
         setPipelineAgents([]);
         setTask('');
@@ -185,7 +273,10 @@ export default function CreateHandoffPage() {
 
   return (
     <div className="max-w-2xl">
-      <PageHeader title="Dispatch Handoff" subtitle="Transfer a task between agents with full context" />
+      <PageHeader 
+        title="Dispatch Handoff" 
+        subtitle={mode === 'templates' ? `${templates.length} workflow templates available` : 'Transfer a task between agents with full context'}
+      />
 
       {feedback && (
         <div className={`border px-4 py-3 mb-6 ${feedback.type === 'success' ? 'border-[#6B9E6B] text-[#6B9E6B] dark:border-[#6B9E6B] dark:text-[#6B9E6B]' : 'border-[#C1341A] text-[#C1341A] dark:border-[#EF4444] dark:text-[#EF4444]'}`}>
@@ -219,13 +310,59 @@ export default function CreateHandoffPage() {
           <GitBranch className="h-4 w-4" />
           <span className="text-sm font-medium">Pipeline</span>
         </button>
+        <button
+          type="button"
+          onClick={() => setMode('templates')}
+          className={`flex items-center gap-2 px-4 py-2.5 border transition-colors ${
+            mode === 'templates'
+              ? 'border-[#1B4FD8] bg-[#1B4FD8]/5 dark:bg-[#1B4FD8]/10 text-[#1B4FD8]'
+              : 'border-[#E4E2DC] dark:border-[#3A3A3A] text-[#6B6B6B] dark:text-[#A8A49E] hover:border-[#1B4FD8]/40'
+          }`}
+        >
+          <FileCode className="h-4 w-4" />
+          <span className="text-sm font-medium">Templates</span>
+        </button>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-8">
         {/* Pipeline Mode: Agent Chain */}
         {mode === 'pipeline' && (
           <div className="space-y-4">
-            <label className="section-label block">Agent Chain</label>
+            <div className="flex items-center justify-between">
+              <label className="section-label block">Agent Chain</label>
+              
+              {/* Parallel/Sequential Toggle */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPipelineMode('sequential')}
+                  className={`px-2 py-1 text-xs rounded transition-colors ${
+                    pipelineMode === 'sequential' 
+                      ? 'bg-[#1B4FD8] text-white' 
+                      : 'bg-[#E4E2DC] dark:bg-[#3A3A3A] text-[#6B6B6B]'
+                  }`}
+                >
+                  Sequential
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPipelineMode('parallel')}
+                  className={`px-2 py-1 text-xs rounded transition-colors ${
+                    pipelineMode === 'parallel' 
+                      ? 'bg-[#1B4FD8] text-white' 
+                      : 'bg-[#E4E2DC] dark:bg-[#3A3A3A] text-[#6B6B6B]'
+                  }`}
+                >
+                  Parallel
+                </button>
+              </div>
+            </div>
+            
+            {pipelineMode === 'parallel' && pipelineAgents.length > 1 && (
+              <div className="p-2 bg-[#F0F5FF] dark:bg-[#1A1A2E] border border-[#1B4FD8]/30 rounded text-xs text-[#1B4FD8]">
+                ⚡ All agents will work simultaneously on the same task
+              </div>
+            )}
             
             {/* Current chain */}
             {pipelineAgents.length > 0 && (
@@ -306,16 +443,55 @@ export default function CreateHandoffPage() {
               <label className="section-label block mb-3">To</label>
               <select
                 value={toAgent}
-                onChange={(e) => setToAgent(e.target.value)}
+                onChange={(e) => {
+                  setToAgent(e.target.value);
+                  // Auto-enable delegate mode if selecting a parent agent
+                  if (isParentAgent(e.target.value)) {
+                    setDelegateMode(true);
+                  }
+                }}
                 className="input-field"
               >
                 <option value="">Select target...</option>
-                {agentEntries.map(([id, agent]) => (
-                  <option key={id} value={id}>
-                    {agent.name} — {agent.role}
-                  </option>
-                ))}
+                {agentEntries.map(([id, agent]) => {
+                  // In delegate mode, hide parent agents
+                  if (delegateMode && isParentAgent(id)) return null;
+                  return (
+                    <option key={id} value={id}>
+                      {agent.name} — {agent.role}
+                    </option>
+                  );
+                })}
               </select>
+              
+              {/* Delegate Mode Toggle */}
+              {toAgent && isParentAgent(toAgent) && (
+                <div className="mt-2 flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="delegateMode"
+                    checked={delegateMode}
+                    onChange={(e) => setDelegateMode(e.target.checked)}
+                    className="w-4 h-4 accent-[#1B4FD8]"
+                  />
+                  <label htmlFor="delegateMode" className="text-xs text-[#6B6B6B] cursor-pointer">
+                    Delegate to sub-agent
+                  </label>
+                  {delegateMode && (
+                    <span className="text-xs text-[#1B4FD8] ml-auto">
+                      {getSubAgents(toAgent).length} available
+                    </span>
+                  )}
+                </div>
+              )}
+              
+              {/* Sub-agent info when delegate mode is on */}
+              {delegateMode && toAgent && (
+                <div className="mt-2 p-2 bg-[#F0F5FF] dark:bg-[#1A1A2E] border border-[#1B4FD8]/30 rounded text-xs">
+                  <span className="text-[#1B4FD8] font-medium">{agents[toAgent]?.name}</span> will delegate to:{' '}
+                  {getSubAgents(toAgent).map(subId => agents[subId]?.name).filter(Boolean).join(', ')}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -485,13 +661,183 @@ export default function CreateHandoffPage() {
         <div className="pt-4">
           <button
             type="submit"
-            disabled={isSubmitting || !fromAgent || !toAgent}
+            disabled={isSubmitting || (mode !== 'pipeline' && (!fromAgent || !toAgent))}
             className="btn-primary"
           >
-            {isSubmitting ? 'Transmitting...' : 'Transmit Handoff →'}
+            {isSubmitting ? 'Transmitting...' : mode === 'pipeline' ? 'Create Pipeline →' : 'Transmit Handoff →'}
           </button>
         </div>
       </form>
+
+      {/* Templates View */}
+      {mode === 'templates' && (
+        <div className="space-y-6">
+          {templatesLoading && (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="h-6 w-6 animate-spin text-[#A8A49E]" />
+            </div>
+          )}
+
+          {!templatesLoading && templates.length === 0 && (
+            <div className="text-center py-16">
+              <p className="text-sm text-[#6B6B6B] dark:text-[#A8A49E]">No templates found</p>
+            </div>
+          )}
+
+          {!templatesLoading && templates.length > 0 && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Template List */}
+              <div className="space-y-4">
+                <h2 className="text-xs uppercase tracking-widest text-[#A8A49E] dark:text-[#6B6B6B] mb-4">
+                  Available Templates
+                </h2>
+                {templates.map((template) => (
+                  <div
+                    key={template.key}
+                    className={`border p-4 cursor-pointer transition-colors ${
+                      selectedTemplate === template.key
+                        ? 'border-[#1B4FD8] bg-[#1B4FD8]/5'
+                        : 'border-[#E4E2DC] dark:border-[#3A3A3A] hover:border-[#1B4FD8]/50'
+                    }`}
+                    onClick={() => setSelectedTemplate(template.key)}
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1">
+                        <h3 className="font-medium text-[#1A1A1A] dark:text-[#FAFAF8] mb-2">
+                          {template.name}
+                        </h3>
+                        <div className="space-y-1">
+                          {template.steps.map((step, i) => (
+                            <div key={i} className="flex items-center gap-2 text-xs">
+                              <span className="text-[#A8A49E] dark:text-[#6B6B6B]">{i + 1}.</span>
+                              <span className="text-[#1A1A1A] dark:text-[#FAFAF8]">{step.from}</span>
+                              <span className="text-[#A8A49E] dark:text-[#6B6B6B]">→</span>
+                              <span className="text-[#1A1A1A] dark:text-[#FAFAF8]">{step.to}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <span className="text-[10px] px-2 py-1 bg-[#E4E2DC] dark:bg-[#3A3A3A] text-[#6B6B6B] dark:text-[#A8A49E]">
+                        {template.steps.length} steps
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Execution Form */}
+              <div className="border border-[#E4E2DC] dark:border-[#3A3A3A] p-6">
+                <h2 className="text-xs uppercase tracking-widest text-[#A8A49E] dark:text-[#6B6B6B] mb-4">
+                  Execute Template
+                </h2>
+
+                {!selectedTemplate && (
+                  <div className="text-center py-12 text-sm text-[#6B6B6B] dark:text-[#A8A49E]">
+                    Select a template to execute
+                  </div>
+                )}
+
+                {selectedTemplate && (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="section-label block mb-2">Task</label>
+                      <textarea
+                        value={templateTask}
+                        onChange={(e) => setTemplateTask(e.target.value)}
+                        placeholder="What needs to be done?"
+                        rows={3}
+                        className="input-field resize-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="section-label block mb-2">Context (Optional)</label>
+                      <textarea
+                        value={templateContext}
+                        onChange={(e) => setTemplateContext(e.target.value)}
+                        placeholder="Background information..."
+                        rows={3}
+                        className="input-field resize-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="section-label block mb-2">Priority</label>
+                      <div className="flex gap-2">
+                        {(['low', 'medium', 'high'] as const).map((p) => (
+                          <button
+                            key={p}
+                            type="button"
+                            onClick={() => setTemplatePriority(p)}
+                            className={`flex-1 py-2 text-xs uppercase tracking-wider border transition-colors ${
+                              templatePriority === p
+                                ? 'border-[#1B4FD8] bg-[#1B4FD8] text-white'
+                                : 'border-[#E4E2DC] dark:border-[#3A3A3A] text-[#6B6B6B] dark:text-[#A8A49E] hover:border-[#1B4FD8]/50'
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="section-label block mb-2">Execution Mode</label>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setRunMode('async')}
+                          className={`flex-1 py-2 text-xs uppercase tracking-wider border transition-colors ${
+                            runMode === 'async'
+                              ? 'border-[#1B4FD8] bg-[#1B4FD8] text-white'
+                              : 'border-[#E4E2DC] dark:border-[#3A3A3A] text-[#6B6B6B] dark:text-[#A8A49E] hover:border-[#1B4FD8]/50'
+                          }`}
+                        >
+                          ⚡ Async
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRunMode('sequential')}
+                          className={`flex-1 py-2 text-xs uppercase tracking-wider border transition-colors ${
+                            runMode === 'sequential'
+                              ? 'border-[#1B4FD8] bg-[#1B4FD8] text-white'
+                              : 'border-[#E4E2DC] dark:border-[#3A3A3A] text-[#6B6B6B] dark:text-[#A8A49E] hover:border-[#1B4FD8]/50'
+                          }`}
+                        >
+                          🔗 Sequential
+                        </button>
+                      </div>
+                      <p className="text-xs text-[#6B6B6B] dark:text-[#A8A49E] mt-2">
+                        {runMode === 'async'
+                          ? 'All steps run in parallel immediately'
+                          : 'Each step waits for previous to complete before starting'}
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={() => selectedTemplate && executeTemplateHandler(selectedTemplate)}
+                      disabled={!templateTask.trim() || executing === selectedTemplate}
+                      className="btn-primary w-full flex items-center justify-center gap-2"
+                    >
+                      {executing === selectedTemplate ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Executing...
+                        </>
+                      ) : (
+                        <>
+                          <Play className="h-4 w-4" />
+                          Execute Template
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

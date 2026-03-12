@@ -42,6 +42,9 @@ coverage/
 # OS
 .DS_Store
 Thumbs.db
+._*
+.Spotlight-V100
+.Trashes
 
 # Build outputs
 dist/
@@ -56,3 +59,8 @@ out/
 
 # Vercel
 .vercel
+.next/
+node_modules/
+.env
+.env.*
+!.env.example

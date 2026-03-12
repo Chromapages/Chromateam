@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   ReactFlow,
   Background,
@@ -16,6 +16,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
+import { useTheme } from '@/components/ThemeProvider';
 import { fetchAgents, fetchAllHandoffs, completeHandoff, escalateHandoff, submitFeedback } from '@/lib/api';
 import { AgentsMap, Handoff } from '@/lib/types';
 import { getLayoutedElements } from '@/lib/layout';
@@ -26,6 +27,9 @@ import WorkspaceToolbar from '@/components/workspace/WorkspaceToolbar';
 import TaskWizard from '@/components/workspace/TaskWizard';
 import MobileWorkspace from '@/components/workspace/MobileWorkspace';
 import MobileAgentDetail from '@/components/workspace/MobileAgentDetail';
+import PipelineProgress from '@/components/workspace/PipelineProgress';
+import ActivityFeed from '@/components/workspace/ActivityFeed';
+import { useToast } from '@/components/Toast';
 
 const nodeTypes = { agent: AgentNode };
 const edgeTypes = { handoff: HandoffEdge };
@@ -34,6 +38,8 @@ type FilterType = 'all' | 'pending' | 'completed';
 type ViewMode = 'canvas' | 'mobile-list' | 'mobile-detail';
 
 export default function WorkspacePage() {
+  const { showToast } = useToast();
+  const { theme } = useTheme();
   const [agents, setAgents] = useState<AgentsMap>({});
   const [handoffs, setHandoffs] = useState<Handoff[]>([]);
   const [nodes, setNodes, onNodesChange] = useNodesState<any>([]);
@@ -41,6 +47,7 @@ export default function WorkspacePage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterType>('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [selectedNode, setSelectedNode] = useState<any>(null);
   const [selectedEdge, setSelectedEdge] = useState<any>(null);
   // Wizard state
@@ -85,12 +92,28 @@ export default function WorkspacePage() {
         reportsTo: agent.reportsTo,
       }));
 
+      // Only set nodes on initial load - preserve positions on subsequent refreshes
       const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
         agentList,
         handoffsData
       );
 
-      setNodes(layoutedNodes);
+      // Check if we already have nodes (preserving positions)
+      setNodes((existingNodes) => {
+        if (existingNodes.length === 0) {
+          // Initial load - use layouted positions
+          return layoutedNodes;
+        }
+        // Refresh - preserve existing positions, only update data
+        return layoutedNodes.map((newNode) => {
+          const existing = existingNodes.find((n) => n.id === newNode.id);
+          if (existing) {
+            return { ...newNode, position: existing.position };
+          }
+          return newNode;
+        });
+      });
+
       setEdges(layoutedEdges);
       setError(null);
     } catch (err) {
@@ -147,13 +170,30 @@ export default function WorkspacePage() {
     }
   }, []);
 
+  // Debounced localStorage save
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
   useEffect(() => {
     if (nodes.length === 0) return;
-    const positions: Record<string, { x: number; y: number }> = {};
-    nodes.forEach((node) => {
-      positions[node.id] = node.position;
-    });
-    localStorage.setItem('workspace-node-positions', JSON.stringify(positions));
+    
+    // Debounce the save to prevent excessive localStorage writes during dragging
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    
+    saveTimeoutRef.current = setTimeout(() => {
+      const positions: Record<string, { x: number; y: number }> = {};
+      nodes.forEach((node) => {
+        positions[node.id] = node.position;
+      });
+      localStorage.setItem('workspace-node-positions', JSON.stringify(positions));
+    }, 500); // 500ms debounce
+    
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
   }, [nodes]);
 
   const onConnect = useCallback(
@@ -186,9 +226,11 @@ export default function WorkspacePage() {
   const handleCompleteHandoff = async (handoffId: string) => {
     try {
       await completeHandoff(handoffId);
+      showToast('Handoff marked complete', 'success');
       loadData();
       setSelectedEdge(null);
     } catch (err) {
+      showToast('Failed to complete handoff', 'error');
       console.error('Failed to complete handoff:', err);
     }
   };
@@ -221,9 +263,10 @@ export default function WorkspacePage() {
     setIsSubmitting(true);
     try {
       const result = await escalateHandoff(selectedEdge.id);
-      alert(`Escalated to ${result.to} (level ${result.escalationLevel})`);
+      showToast(`Escalated to ${result.to} (level ${result.escalationLevel})`, 'info');
       loadData();
     } catch (err) {
+      showToast('Failed to escalate handoff', 'error');
       console.error('Failed to escalate:', err);
     } finally {
       setIsSubmitting(false);
@@ -234,8 +277,9 @@ export default function WorkspacePage() {
     if (!selectedEdge) return;
     try {
       await submitFeedback(selectedEdge.id, { rating, comments: '' });
-      alert('Feedback submitted');
+      showToast('Feedback submitted', 'success');
     } catch (err) {
+      showToast('Failed to submit feedback', 'error');
       console.error('Failed to submit feedback:', err);
     }
   };
@@ -257,6 +301,22 @@ export default function WorkspacePage() {
   const selectedHandoff = selectedEdge
     ? handoffs.find((h) => h.id === selectedEdge.id)
     : null;
+
+  // Build pipeline steps for the selected handoff (if it's part of a pipeline)
+  const pipelineSteps = selectedHandoff?.pipelineId
+    ? handoffs
+        .filter((h) => h.pipelineId === selectedHandoff.pipelineId)
+        .sort((a, b) => (a.pipelineStep ?? 0) - (b.pipelineStep ?? 0))
+        .map((h) => ({
+          agentId: h.toAgent,
+          agentName: agents[h.toAgent]?.name || h.toAgent,
+          status: (h.status === 'completed'
+            ? 'completed'
+            : h.status === 'in_progress'
+            ? 'in_progress'
+            : 'pending') as 'completed' | 'in_progress' | 'pending',
+        }))
+    : [];
 
   const selectedAgent = selectedNode
     ? agents[selectedNode.id]
@@ -330,10 +390,12 @@ export default function WorkspacePage() {
           nodeColor={(node) => {
             const data = node.data as { pendingCount?: number };
             const isPending = (data?.pendingCount ?? 0) > 0;
-            return isPending ? '#1B4FD8' : 'rgba(36, 36, 36, 0.8)';
+            const isDark = theme === 'dark';
+            if (isPending) return '#1B4FD8';
+            return isDark ? 'rgba(36, 36, 36, 0.8)' : 'rgba(228, 226, 220, 0.8)';
           }}
-          maskColor="rgba(18, 18, 18, 0.85)"
-          className="!bg-[#242424] !border !border-[#3A3A3A]"
+          maskColor={theme === 'dark' ? 'rgba(18, 18, 18, 0.85)' : 'rgba(250, 250, 248, 0.85)'}
+          className="!bg-[#FAFAF8] dark:!bg-[#242424] !border !border-[#E4E2DC] dark:!border-[#3A3A3A]"
         />
         
         <Panel position="top-left" className="m-4">
@@ -342,8 +404,20 @@ export default function WorkspacePage() {
             onFilterChange={setFilter}
             onAssignTask={handleAssignTask}
             onAutoLayout={loadData}
+            onSearchChange={setSearchQuery}
+            searchQuery={searchQuery}
             pendingCount={handoffs.filter((h) => h.status === 'pending').length}
             completedCount={handoffs.filter((h) => h.status === 'completed').length}
+          />
+        </Panel>
+
+        <Panel position="bottom-right" className="m-4">
+          <ActivityFeed
+            wsUrl={
+              typeof window !== 'undefined'
+                ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://localhost:3461`
+                : (process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3461')
+            }
           />
         </Panel>
       </ReactFlow>
@@ -433,6 +507,16 @@ export default function WorkspacePage() {
           </div>
         ) : selectedEdge && selectedHandoff ? (
           <div className="space-y-4">
+            {/* Pipeline progress tracker */}
+            {pipelineSteps.length > 1 && (
+              <div className="pb-4 border-b border-[#E4E2DC] dark:border-[#3A3A3A]">
+                <PipelineProgress
+                  steps={pipelineSteps}
+                  currentStep={selectedHandoff.pipelineStep ?? 0}
+                />
+              </div>
+            )}
+
             <div className="flex items-center gap-2 text-sm">
               <span className="font-medium text-[#1A1A1A] dark:text-[#FAFAF8]">{agents[selectedHandoff.fromAgent]?.name || selectedHandoff.fromAgent}</span>
               <span className="text-[#A8A49E]">→</span>

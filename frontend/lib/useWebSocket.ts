@@ -1,8 +1,9 @@
 import { useEffect, useRef, useCallback } from 'react';
+import type { Handoff } from './types';
 
 interface WebSocketMessage {
   type: 'created' | 'updated' | 'completed';
-  handoff: any;
+  handoff: Handoff;
   timestamp: string;
 }
 
@@ -16,7 +17,6 @@ export function useWebSocket(url: string, onMessage: (message: WebSocketMessage)
       const ws = new WebSocket(url);
       
       ws.onopen = () => {
-        console.log('📡 WebSocket connected');
         reconnectAttemptsRef.current = 0;
       };
 
@@ -24,30 +24,28 @@ export function useWebSocket(url: string, onMessage: (message: WebSocketMessage)
         try {
           const message = JSON.parse(event.data);
           onMessage(message);
-        } catch (err) {
-          console.error('Failed to parse WebSocket message:', err);
+        } catch {
+          // Silently ignore parse errors in production
         }
       };
 
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
+      ws.onerror = () => {
+        // Connection errors handled by onclose
       };
 
       ws.onclose = () => {
-        console.log('📡 WebSocket disconnected');
         wsRef.current = null;
 
         // Exponential backoff reconnection
         const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 30000);
         reconnectAttemptsRef.current++;
         
-        console.log(`Reconnecting in ${delay}ms...`);
         reconnectTimeoutRef.current = setTimeout(connect, delay);
       };
 
       wsRef.current = ws;
-    } catch (err) {
-      console.error('Failed to create WebSocket:', err);
+    } catch {
+      // WebSocket creation errors handled silently
     }
   }, [url, onMessage]);
 

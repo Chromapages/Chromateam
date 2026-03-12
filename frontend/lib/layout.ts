@@ -30,6 +30,7 @@ export function getLayoutedElements(
   const g = new dagre.graphlib.Graph();
   const pendingIncomingCounts = new Map<string, number>();
   const pendingOutgoingCounts = new Map<string, number>();
+  const oldestPendingAt = new Map<string, string>();
 
   handoffs.forEach((handoff) => {
     if (handoff.status !== 'pending') {
@@ -45,6 +46,13 @@ export function getLayoutedElements(
       handoff.fromAgent,
       (pendingOutgoingCounts.get(handoff.fromAgent) ?? 0) + 1
     );
+
+    if (handoff.createdAt) {
+      const existing = oldestPendingAt.get(handoff.toAgent);
+      if (!existing || handoff.createdAt < existing) {
+        oldestPendingAt.set(handoff.toAgent, handoff.createdAt);
+      }
+    }
   });
 
   g.setGraph({
@@ -101,6 +109,7 @@ export function getLayoutedElements(
         pendingCount: incomingPending,
         incomingPending,
         outgoingPending,
+        oldestPendingAt: oldestPendingAt.get(agent.id),
       },
     };
   });

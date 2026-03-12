@@ -77,8 +77,8 @@ export async function completeHandoff(handoffId: string): Promise<{ success: boo
 
 // ==================== NEW BACKEND API FUNCTIONS ====================
 
-export async function fetchTemplates(): Promise<Template[]> {
-  const data = await apiFetch<{ templates: Template[] }>('/templates');
+export async function fetchTemplates(): Promise<Array<Template & { key: string; stepCount: number }>> {
+  const data = await apiFetch<{ templates: Array<Template & { key: string; stepCount: number }> }>('/templates');
   return data.templates;
 }
 
@@ -190,6 +190,7 @@ export async function createPipeline(payload: {
   task: string;
   context: string;
   priority: string;
+  runMode?: 'sequential' | 'parallel';
 }): Promise<{ success: boolean; pipelineId: string; steps: number; results: { handoffId: string }[] }> {
   return apiFetch('/pipeline', {
     method: 'POST',
@@ -209,6 +210,12 @@ export interface DeliverableFile {
 export async function fetchHandoffDeliverables(handoffId: string): Promise<{ files: DeliverableFile[]; path: string; count: number }> {
   return apiFetch(`/handoff/${handoffId}/deliverables`, {
     method: 'GET',
+  });
+}
+
+export async function cancelHandoff(handoffId: string): Promise<{ success: boolean; message: string }> {
+  return apiFetch(`/handoff/${handoffId}/cancel`, {
+    method: 'POST',
   });
 }
 
@@ -252,4 +259,109 @@ export async function createHandoffWithFiles(
   }
 
   return res.json();
+}
+
+// Metrics
+export async function fetchMetrics() {
+  const res = await fetch(`${API_BASE}/metrics`);
+  if (!res.ok) throw new Error('Failed to fetch metrics');
+  return res.json();
+}
+
+// ==================== NEW BACKEND API FUNCTIONS ====================
+
+import {
+  Schedule,
+  ScheduleCreatePayload,
+  ScheduleCreateResponse,
+  Webhook,
+  WebhookCreatePayload,
+  WebhookCreateResponse,
+  WebhookTestResponse,
+  Automation,
+  AutomationCreatePayload,
+  AutomationCreateResponse,
+  AutomationRunResponse,
+} from './types';
+
+// Schedules
+export async function fetchSchedules(): Promise<Schedule[]> {
+  return apiFetch<Schedule[]>('/schedules');
+}
+
+export async function createSchedule(payload: ScheduleCreatePayload): Promise<ScheduleCreateResponse> {
+  return apiFetch('/schedules', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteSchedule(id: string): Promise<{ success: boolean }> {
+  return apiFetch(`/schedules/${id}`, { method: 'DELETE' });
+}
+
+// Cron Schedules
+export async function createCronSchedule(payload: {
+  cron: string;
+  task: string;
+  name?: string;
+  type?: 'handoff' | 'automation' | 'webhook';
+  fromAgent?: string;
+  toAgent?: string;
+  priority?: 'low' | 'medium' | 'high';
+}): Promise<ScheduleCreateResponse> {
+  return apiFetch('/cron', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+// Webhooks
+export async function fetchWebhooks(): Promise<Webhook[]> {
+  return apiFetch<Webhook[]>('/webhooks');
+}
+
+export async function createWebhook(payload: WebhookCreatePayload): Promise<WebhookCreateResponse> {
+  return apiFetch('/webhooks', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteWebhook(id: string): Promise<{ success: boolean }> {
+  return apiFetch(`/webhooks/${id}`, { method: 'DELETE' });
+}
+
+export async function testWebhook(id: string): Promise<WebhookTestResponse> {
+  return apiFetch(`/webhooks/${id}/test`, { method: 'POST' });
+}
+
+// Automations
+export async function fetchAutomations(): Promise<Automation[]> {
+  return apiFetch<Automation[]>('/automations');
+}
+
+export async function createAutomation(payload: AutomationCreatePayload): Promise<AutomationCreateResponse> {
+  return apiFetch('/automations', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function runAutomation(id: string): Promise<AutomationRunResponse> {
+  return apiFetch<AutomationRunResponse>(`/automations/${id}`, { method: 'GET' });
+}
+
+export async function scheduleAutomation(
+  id: string,
+  schedule: { cron?: string; scheduledAt?: string }
+): Promise<{ success: boolean; scheduleId: string }> {
+  return apiFetch(`/automations/${id}/schedule`, {
+    method: 'POST',
+    body: JSON.stringify(schedule),
+  });
+}
+
+export async function deleteAutomation(id: string): Promise<{ success: boolean }> {
+  return apiFetch(`/automations/${id}`, { method: 'DELETE' });
 }

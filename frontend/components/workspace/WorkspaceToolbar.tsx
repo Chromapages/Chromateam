@@ -1,13 +1,15 @@
 'use client';
 
 import { useState } from 'react';
-import { Plus, RotateCcw, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, RotateCcw, ChevronDown, ChevronUp, Search, X } from 'lucide-react';
 
 interface WorkspaceToolbarProps {
   filter: 'all' | 'pending' | 'completed';
   onFilterChange: (filter: 'all' | 'pending' | 'completed') => void;
   onAssignTask: () => void;
   onAutoLayout: () => void;
+  onSearchChange: (query: string) => void;
+  searchQuery: string;
   pendingCount: number;
   completedCount: number;
 }
@@ -17,6 +19,8 @@ export default function WorkspaceToolbar({
   onFilterChange,
   onAssignTask,
   onAutoLayout,
+  onSearchChange,
+  searchQuery,
   pendingCount,
   completedCount,
 }: WorkspaceToolbarProps) {
@@ -51,6 +55,28 @@ export default function WorkspaceToolbar({
           <Plus className="h-4 w-4" strokeWidth={2} />
           Assign Task
         </button>
+      </div>
+
+      {/* Search input - always visible */}
+      <div className="px-3 pb-3">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[#A8A49E]" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="Search agents or tasks..."
+            className="w-full pl-8 pr-8 py-2 text-[11px] bg-[#FAFAF8] dark:bg-[#1A1A1A] border border-[#E4E2DC] dark:border-[#3A3A3A] text-[#1A1A1A] dark:text-[#FAFAF8] placeholder:text-[#A8A49E] focus:outline-none focus:border-[#1B4FD8] transition-colors"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => onSearchChange('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#A8A49E] hover:text-[#1A1A1A] dark:hover:text-[#FAFAF8]"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
       {isExpanded && (

@@ -43,6 +43,10 @@ import {
   createPipeline,
   fetchTemplates,
   executeTemplate,
+  fetchAutocomplete,
+  fetchSimilarTasks,
+  scheduleHandoff,
+  createConditionalHandoff,
 } from '@/lib/api';
 
 interface TaskWizardProps {
@@ -56,7 +60,7 @@ interface TaskWizardProps {
 
 type WizardStep = 'task' | 'who' | 'review';
 type UrgencyLevel = 'low' | 'medium' | 'high';
-type SendMode = 'single' | 'multiple' | 'pipeline' | 'ai';
+type SendMode = 'single' | 'multiple' | 'pipeline' | 'ai' | 'conditional' | 'scheduled';
 
 function getRoleIcon(role: string) {
   const icons: Record<string, typeof Briefcase> = {
@@ -105,6 +109,16 @@ export default function TaskWizard({
   const [templates, setTemplates] = useState<Template[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // New states for unused endpoints
+  const [autocompleteSuggestions, setAutocompleteSuggestions] = useState<string[]>([]);
+  const [similarTasks, setSimilarTasks] = useState<{id: string; task: string; agent: string; completed: boolean}[]>([]);
+  const [showAutocomplete, setShowAutocomplete] = useState(false);
+  const [scheduleTime, setScheduleTime] = useState('');
+  const [conditionalKeywords, setConditionalKeywords] = useState('');
+  const [ifTrueAgent, setIfTrueAgent] = useState('');
+  const [ifFalseAgent, setIfFalseAgent] = useState('');
+  const autocompleteTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const agentEntries = Object.entries(agents);
 
@@ -208,6 +222,28 @@ export default function TaskWizard({
         } else {
           await createHandoff({ fromAgent, toAgent: selectedAgents[0], task, context: '', decisions: [], nextSteps: [], priority: urgency });
         }
+      } else if (sendMode === 'scheduled' && selectedAgents.length === 1 && scheduleTime) {
+        await scheduleHandoff({
+          fromAgent,
+          toAgent: selectedAgents[0],
+          task,
+          context: '',
+          scheduledAt: new Date(scheduleTime).toISOString(),
+          priority: urgency
+        });
+        alert(`Task scheduled for ${new Date(scheduleTime).toLocaleString()}`);
+      } else if (sendMode === 'conditional' && ifTrueAgent && ifFalseAgent) {
+        const result = await createConditionalHandoff({
+          trigger: task,
+          condition: {
+            type: 'keyword',
+            keywords: conditionalKeywords.split(',').map(k => k.trim()).filter(Boolean)
+          },
+          ifTrue: ifTrueAgent,
+          ifFalse: ifFalseAgent,
+          context: ''
+        });
+        alert(`Conditional route: ${result.condition === 'met' ? ifTrueAgent : ifFalseAgent} (${result.condition})`);
       }
       onComplete();
       onClose();
@@ -266,12 +302,71 @@ export default function TaskWizard({
 
             <textarea
               value={task}
-              onChange={(e) => setTask(e.target.value)}
+              onChange={(e) => {
+                const value = e.target.value;
+                setTask(value);
+                
+                // Fetch autocomplete suggestions
+                if (value.length >= 2) {
+                  if (autocompleteTimeoutRef.current) clearTimeout(autocompleteTimeoutRef.current);
+                  autocompleteTimeoutRef.current = setTimeout(async () => {
+                    try {
+                      const data = await fetchAutocomplete(value);
+                      setAutocompleteSuggestions(data.suggestions || []);
+                      setShowAutocomplete(data.suggestions?.length > 0);
+                      
+                      // Also fetch similar tasks
+                      const similar = await fetchSimilarTasks(value);
+                      setSimilarTasks(similar.similar || []);
+                    } catch {
+                      // silently fail
+                    }
+                  }, 300);
+                } else {
+                  setShowAutocomplete(false);
+                  setAutocompleteSuggestions([]);
+                }
+              }}
               placeholder="e.g., Design the new landing page for the product launch"
               rows={5}
               autoFocus
               className="w-full px-4 py-3 bg-[#FAFAF8] dark:bg-[#1A1A1A] border border-[#E4E2DC] dark:border-[#3A3A3A] text-[#1A1A1A] dark:text-[#FAFAF8] text-sm placeholder:text-[#A8A49E] dark:placeholder:text-[#6B6B6B] focus:outline-none focus:border-[#1B4FD8] resize-none transition-colors"
             />
+            
+            {/* Autocomplete suggestions */}
+            {showAutocomplete && autocompleteSuggestions.length > 0 && (
+              <div className="absolute z-10 w-full bg-white dark:bg-[#242424] border border-[#E4E2DC] dark:border-[#3A3A3A] shadow-lg mt-1">
+                {autocompleteSuggestions.map((suggestion, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => {
+                      setTask(suggestion + task.slice(suggestion.length));
+                      setShowAutocomplete(false);
+                    }}
+                    className="w-full text-left px-4 py-2 text-sm text-[#1A1A1A] dark:text-[#FAFAF8] hover:bg-[#F5F5F3] dark:hover:bg-[#2A2A2A] transition-colors"
+                  >
+                    <span className="text-[#1B4FD8]">{suggestion.slice(0, task.length)}</span>
+                    <span>{suggestion.slice(task.length)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            
+            {/* Similar tasks */}
+            {similarTasks.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs text-[#A8A49E] dark:text-[#6B6B6B]">Similar completed tasks:</p>
+                {similarTasks.slice(0, 3).map((t) => (
+                  <div key={t.id} className="flex items-center gap-2 px-3 py-2 bg-[#FAFAF8] dark:bg-[#1A1A1A] border border-[#E4E2DC] dark:border-[#3A3A3A] text-xs">
+                    <span className={t.completed ? 'text-[#1B7A4A]' : 'text-[#A07020]'}>
+                      {t.completed ? '✓' : '○'}
+                    </span>
+                    <span className="flex-1 truncate">{t.task}</span>
+                    <span className="text-[#A8A49E] capitalize">{t.agent}</span>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Saved workflows / templates */}
             <button
@@ -329,6 +424,8 @@ export default function TaskWizard({
                 { mode: 'single' as SendMode, icon: ArrowRight, label: 'Single Agent', desc: 'One person' },
                 { mode: 'multiple' as SendMode, icon: Users, label: 'Parallel', desc: 'Same task, many' },
                 { mode: 'ai' as SendMode, icon: Sparkles, label: 'AI Picks', desc: 'Auto-route' },
+                { mode: 'scheduled' as SendMode, icon: Clock, label: 'Scheduled', desc: 'Future time' },
+                { mode: 'conditional' as SendMode, icon: AlertTriangle, label: 'Conditional', desc: 'Smart routing' },
               ]).map(({ mode, icon: Icon, label, desc }) => (
                 <button
                   key={mode}
@@ -479,6 +576,114 @@ export default function TaskWizard({
                 <Sparkles className="h-8 w-8 text-[#1B4FD8] mx-auto" strokeWidth={1.5} />
                 <p className="text-sm text-[#1A1A1A] dark:text-[#FAFAF8] font-medium">AI will route this automatically</p>
                 <p className="text-xs text-[#A8A49E] dark:text-[#6B6B6B]">Based on task keywords and agent workload.</p>
+              </div>
+            )}
+
+            {/* SCHEDULED MODE */}
+            {sendMode === 'scheduled' && (
+              <div className="space-y-4">
+                <div className="px-4 py-5 border border-[#E4E2DC] dark:border-[#3A3A3A] bg-[#FAFAF8] dark:bg-[#1A1A1A] text-center space-y-2">
+                  <Clock className="h-8 w-8 text-[#1B4FD8] mx-auto" strokeWidth={1.5} />
+                  <p className="text-sm text-[#1A1A1A] dark:text-[#FAFAF8] font-medium">Schedule for later</p>
+                </div>
+                
+                <div>
+                  <label className="text-[10px] uppercase tracking-wider text-[#A8A49E] dark:text-[#6B6B6B] block mb-2">
+                    Schedule Time
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={scheduleTime}
+                    onChange={(e) => setScheduleTime(e.target.value)}
+                    className="w-full px-3 py-2 bg-[#FAFAF8] dark:bg-[#1A1A1A] border border-[#E4E2DC] dark:border-[#3A3A3A] text-[#1A1A1A] dark:text-[#FAFAF8] text-sm focus:outline-none focus:border-[#1B4FD8]"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] uppercase tracking-wider text-[#A8A49E] dark:text-[#6B6B6B] block mb-2">
+                    Target Agent
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {agentEntries.map(([id, agent]) => {
+                      const Icon = getRoleIcon(agent.role);
+                      const isSelected = selectedAgents.includes(id);
+                      return (
+                        <button
+                          key={id}
+                          onClick={() => setSelectedAgents([id])}
+                          className={`flex items-center gap-2 px-3 py-2 border transition-colors text-left ${
+                            isSelected
+                              ? 'border-[#1B4FD8] bg-[#1B4FD8]/5 dark:bg-[#1B4FD8]/10'
+                              : 'border-[#E4E2DC] dark:border-[#3A3A3A] hover:border-[#1B4FD8]/60 bg-white dark:bg-[#242424]'
+                          }`}
+                        >
+                          <Icon className="h-4 w-4 text-[#6B6B6B] dark:text-[#A8A49E]" strokeWidth={1.5} />
+                          <span className="text-xs text-[#1A1A1A] dark:text-[#FAFAF8]">{agent.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* CONDITIONAL MODE */}
+            {sendMode === 'conditional' && (
+              <div className="space-y-4">
+                <div className="px-4 py-5 border border-[#E4E2DC] dark:border-[#3A3A3A] bg-[#FAFAF8] dark:bg-[#1A1A1A] text-center space-y-2">
+                  <AlertTriangle className="h-8 w-8 text-[#A07020] mx-auto" strokeWidth={1.5} />
+                  <p className="text-sm text-[#1A1A1A] dark:text-[#FAFAF8] font-medium">Smart keyword routing</p>
+                  <p className="text-xs text-[#A8A49E] dark:text-[#6B6B6B]">Route based on task content.</p>
+                </div>
+
+                <div>
+                  <label className="text-[10px] uppercase tracking-wider text-[#A8A49E] dark:text-[#6B6B6B] block mb-2">
+                    Keywords (comma separated)
+                  </label>
+                  <input
+                    type="text"
+                    value={conditionalKeywords}
+                    onChange={(e) => setConditionalKeywords(e.target.value)}
+                    placeholder="e.g., urgent, bug, design"
+                    className="w-full px-3 py-2 bg-[#FAFAF8] dark:bg-[#1A1A1A] border border-[#E4E2DC] dark:border-[#3A3A3A] text-[#1A1A1A] dark:text-[#FAFAF8] text-sm placeholder:text-[#A8A49E] focus:outline-none focus:border-[#1B4FD8]"
+                  />
+                  <p className="text-[10px] text-[#A8A49E] dark:text-[#6B6B6B] mt-1">
+                    If task contains these keywords → True agent, else → False agent
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-wider text-[#1B7A4A] block mb-2">
+                      If Match (True)
+                    </label>
+                    <select
+                      value={ifTrueAgent}
+                      onChange={(e) => setIfTrueAgent(e.target.value)}
+                      className="w-full px-3 py-2 bg-[#FAFAF8] dark:bg-[#1A1A1A] border border-[#E4E2DC] dark:border-[#3A3A3A] text-[#1A1A1A] dark:text-[#FAFAF8] text-sm focus:outline-none focus:border-[#1B4FD8]"
+                    >
+                      <option value="">Select agent...</option>
+                      {agentEntries.map(([id, agent]) => (
+                        <option key={id} value={id}>{agent.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-wider text-[#C1341A] block mb-2">
+                      If No Match (False)
+                    </label>
+                    <select
+                      value={ifFalseAgent}
+                      onChange={(e) => setIfFalseAgent(e.target.value)}
+                      className="w-full px-3 py-2 bg-[#FAFAF8] dark:bg-[#1A1A1A] border border-[#E4E2DC] dark:border-[#3A3A3A] text-[#1A1A1A] dark:text-[#FAFAF8] text-sm focus:outline-none focus:border-[#1B4FD8]"
+                    >
+                      <option value="">Select agent...</option>
+                      {agentEntries.map(([id, agent]) => (
+                        <option key={id} value={id}>{agent.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
               </div>
             )}
           </div>

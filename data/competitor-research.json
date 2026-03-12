@@ -1,0 +1,79 @@
+[
+  {
+    "id": "auto_competitor_research_weekly",
+    "name": "Weekly Competitive Research",
+    "description": "Prism monitors competitors, generates intelligence report, posts to Discord",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * 1" 
+    },
+    "steps": [
+      {
+        "type": "handoff",
+        "name": "Scan Competitors",
+        "from": "chroma",
+        "to": "prism",
+        "task": "Run a comprehensive competitive research scan.\n\nFocus areas:\n1. Monitor 3-5 main competitors in the tax/SMB software space\n2. Check for new features, pricing changes, blog content\n3. Look at their ads (Meta Ad Library if possible)\n4. Find 3 actionable insights\n\nOutput format:\n- **Threats:** What are competitors doing that could hurt us?\n- **Opportunities:** What gaps can we exploit?\n- **Trends:** What's working in the market?\n- **Action Items:** 3 specific things we should do this week"
+      },
+      {
+        "type": "handoff",
+        "name": "Analyze Findings",
+        "from": "prism",
+        "to": "prism",
+        "task": "Take the competitor scan results and create a structured intelligence report.\n\nFormat:\n- Executive Summary (2-3 sentences)\n- Top 3 Insights (with evidence)\n- Recommended Actions (ranked by priority)\n- Next Steps (what to do this week)"
+      },
+      {
+        "type": "discord",
+        "name": "Post to Channel",
+        "channelId": "1476291959730733056",
+        "message": "## 📊 Weekly Competitive Intelligence\n\n**Scan completed by Prism**\n\n{{handoff_result}}\n\n---\n*This runs every Monday at 9am. View full history in AHM.*"
+      },
+      {
+        "type": "handoff",
+        "name": "Create Action Items",
+        "from": "chroma",
+        "to": "chief",
+        "task": "Create action items in Chromabase based on the competitor research findings.\n\nFor each action item in the research:\n1. Create a task in Chromabase\n2. Assign priority (high/medium/low)\n3. Set due date (within 1 week)\n4. Add to 'Competitive Response' project if exists"
+      }
+    ],
+    "context": {
+      "competitors": [
+        "TaxSlayer",
+        "H&R Block",
+        "TurboTax",
+        "Jackson Hewitt"
+      ],
+      "monitoringFrequency": "weekly"
+    },
+    "enabled": true,
+    "createdAt": 1773161400000,
+    "lastRun": null,
+    "nextRun": "2026-03-16T09:00:00-07:00"
+  },
+  {
+    "id": "auto_competitor_research_on_demand",
+    "name": "On-Demand Competitor Scan",
+    "description": "Run a competitive research scan on demand",
+    "trigger": {
+      "type": "manual"
+    },
+    "steps": [
+      {
+        "type": "handoff",
+        "name": "Scan Competitors",
+        "from": "chroma",
+        "to": "prism",
+        "task": "Run a competitive research scan on demand.\n\nFocus: {{focus_area | 'general market overview'}}\n\nCompetitors: {{competitors | 'TaxSlayer, H&R Block, TurboTax'}}\n\nOutput actionable insights we can use."
+      },
+      {
+        "type": "discord",
+        "name": "Post Results",
+        "channelId": "1476291959730733056",
+        "message": "## 🔍 Competitor Scan Complete\n\n**Focus:** {{focus_area}}\n\n{{handoff_result}}"
+      }
+    ],
+    "context": {},
+    "enabled": true,
+    "createdAt": 1773161400000
+  }
+]

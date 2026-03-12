@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Handoff Manager - API Reference</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0a0a0a;
+      color: #e4e4e4;
+      line-height: 1.6;
+      padding: 2rem;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(135deg, #8b5cf6, #ec4899);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .subtitle { color: #888; margin-bottom: 2rem; }
+    .endpoint-group {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      margin-bottom: 1.5rem;
+      overflow: hidden;
+    }
+    .group-header {
+      background: rgba(255,255,255,0.05);
+      padding: 1rem 1.25rem;
+      font-weight: 600;
+      color: #fff;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    .endpoint {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    .endpoint:last-child { border-bottom: none; }
+    .method {
+      display: inline-block;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-right: 0.75rem;
+      text-transform: uppercase;
+    }
+    .method.get { background: #10b981; color: #000; }
+    .method.post { background: #3b82f6; color: #fff; }
+    .path {
+      font-family: 'Monaco', 'Menlo', monospace;
+      color: #8b5cf6;
+      font-size: 0.9rem;
+    }
+    .description {
+      color: #888;
+      margin: 0.5rem 0 0 3.5rem;
+      font-size: 0.9rem;
+    }
+    .example {
+      background: rgba(0,0,0,0.3);
+      border-left: 3px solid #8b5cf6;
+      padding: 0.75rem 1rem;
+      margin: 0.75rem 0 0 3.5rem;
+      font-family: monospace;
+      font-size: 0.8rem;
+      color: #aaa;
+      overflow-x: auto;
+      border-radius: 0 4px 4px 0;
+    }
+    .status {
+      display: flex;
+      gap: 2rem;
+      margin-bottom: 2rem;
+      flex-wrap: wrap;
+    }
+    .status-item {
+      text-align: center;
+    }
+      .status-item .number {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #8b5cf6;
+    }
+    .status-item .label {
+      font-size: 0.8rem;
+      color: #666;
+      text-transform: uppercase;
+    }
+    .base-url {
+      background: rgba(139, 92, 246, 0.1);
+      border: 1px solid rgba(139, 92, 246, 0.3);
+      padding: 0.75rem 1rem;
+      border-radius: 6px;
+      margin-bottom: 2rem;
+      font-family: monospace;
+    }
+    .base-url span { color: #8b5cf6; }
+    a { color: #8b5cf6; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .ws-badge {
+      display: inline-block;
+      background: #f59e0b;
+      color: #000;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      margin-left: 0.5rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Agent Handoff Manager</h1>
+    <p class="subtitle">API Reference & Endpoint Documentation</p>
+
+    <div class="base-url">
+      <span>Base URL:</span> http://localhost:3461/api<br>
+      <span>WebSocket:</span> ws://localhost:3461 <span class="ws-badge">LIVE</span>
+    </div>
+
+    <!-- System -->
+    <div class="endpoint-group">
+      <div class="group-header">System & Health</div>
+      <div class="endpoint">
+        <span class="method get">GET</span>
+        <span class="path">/</span>
+        <div class="description">API root with endpoint list</div>
+      </div>
+      <div class="endpoint">
+        <span class="method get">GET</span>
+        <span class="path">/health</span>
+        <div class="description">System health check</div>
+        <div class="example">curl http://localhost:3461/health</div>
+      </div>
+    </div>
+
+    <!-- Agents -->
+    <div class="endpoint-group">
+      <div class="group-header">Agents</div>
+      <div class="endpoint">
+        <span class="method get">GET</span>
+        <span class="path">/agents</span>
+        <div class="description">List all agents with status and workload</div>
+      </div>
+      <div class="endpoint">
+        <span class="method get">GET</span>
+        <span class="path">/agents/:id/status</span>
+        <div class="description">Get specific agent details and pending tasks</div>
+        <div class="example">curl http://localhost:3461/api/agents/bender/status</div>
+      </div>
+    </div>
+
+    <!-- Handoffs -->
+    <div class="endpoint-group">
+      <div class="group-header">Handoffs (Core)</div>
+      <div class="endpoint">
+        <span class="method get">GET</span>
+        <span class="path">/handoffs</span>
+        <div class="description">List all handoffs sorted by newest first</div>
+      </div>
+      <div class="endpoint">
+        <span class="method post">POST</span>
+        <span class="path">/handoff</span>
+        <div class="description">Create a new handoff between agents</div>
+        <div class="example">curl -X POST http://localhost:3461/api/handoff \
+  -H "Content-Type: application/json" \
+  -d '{"fromAgent":"chroma","toAgent":"bender","task":"Build landing page","priority":"high"}'</div>
+      </div>
+      <div class="endpoint">
+        <span class="method post">POST</span>
+        <span class="path">/handoff/with-dependencies</span>
+        <div class="description">Create handoff that waits for other handoffs to complete</div>
+        <div class="example">curl -X POST http://localhost:3461/api/handoff/with-dependencies \
+  -d '{"fromAgent":"prism","toAgent":"pixel","task":"Write copy","dependsOn":["handoff_123"]}'</div>
+      </div>
+      <div class="endpoint">
+        <span class="method post">POST</span>
+        <span class="path">/handoff/:id/start</span>
+        <div class="description">Mark handoff as in_progress</div>
+      </div>
+      <div class="endpoint">
+        <span class="method post">POST</span>
+        <span class="path">/handoff/:id/complete</span>
+        <div class="description">Complete a handoff</div>
+      </div>
+      <div class="endpoint">
+        <span class="method post">POST</span>
+        <span class="path">/handoff/:id/cancel</span>
+        <div class="description">Cancel a pending handoff</div>
+      </div>
+      <div class="endpoint">
+        <span class="method get">GET</span>
+        <span class="path">/context/:agentId</span>
+        <div class="description">Get agent's pending handoffs and context</div>
+      </div>
+    </div>
+
+    <!-- Templates & Pipelines -->
+    <div class="endpoint-group">
+      <div class="group-header">Templates & Pipelines</div>
+      <div class="endpoint">
+        <span class="method get">GET</span>
+        <span class="path">/templates</span>
+        <div class="description">List all available templates</div>
+      </div>
+      <div class="endpoint">
+        <span class="method post">POST</span>
+        <span class="path">/templates</span>
+        <div class="description">Create new template</div>
+      </div>
+      <div class="endpoint">
+        <span class="method post">POST</span>
+        <span class="path">/template/:name/execute</span>
+        <div class="description">Execute template (async or sequential)</div>
+        <div class="example">curl -X POST http://localhost:3461/api/template/full-pipeline/execute \
+  -d '{"task":"Build portfolio website","runAsync":true}'</div>
+      </div>
+      <div class="endpoint">
+        <span class="method post">POST</span>
+        <span class="path">/pipeline</span>
+        <div class="description">Create custom agent pipeline</div>
+        <div class="example">curl -X POST http://localhost:3461/api/pipeline \
+  -d '{"agents":["chroma","prism","pixel","bender"],"task":"Launch product"}'</div>
+      </div>
+      <div class="endpoint">
+        <span class="method get">GET</span>
+        <span class="path">/pipeline/:id</span>
+        <div class="description">Get pipeline status and progress</div>
+      </div>
+      <div class="endpoint">
+        <span class="method post">POST</span>
+        <span class="path">/pipeline/:id/cancel</span>
+        <div class="description">Cancel all pending steps in pipeline</div>
+      </div>
+    </div>
+
+    <!-- Smart Routing -->
+    <div class="endpoint-group">
+      <div class="group-header">Smart Routing</div>
+      <div class="endpoint">
+        <span class="method post">POST</span>
+        <span class="path">/auto-assign</span>
+        <div class="description">Auto-route task based on keywords + workload</div>
+        <div class="example">curl -X POST http://localhost:3461/api/auto-assign \
+  -d '{"task":"Fix login bug","priority":"urgent"}'</div>
+      </div>
+      <div class="endpoint">
+        <span class="method post">POST</span>
+        <span class="path">/task/:agentId</span>
+        <div class="description">Send task directly to specific agent</div>
+      </div>
+      <div class="endpoint">
+        <span class="method post">POST</span>
+        <span class="path">/chat/:agentId</span>
+        <div class="description">Send chat message to agent</div>
+      </div>
+    </div>
+
+    <!-- Advanced -->
+    <div class="endpoint-group">
+      <div class="group-header">Advanced Features</div>
+      <div class="endpoint">
+        <span class="method post">POST</span>
+        <span class="path">/parallel</span>
+        <div class="description">Send task to multiple agents simultaneously</div>
+        <div class="example">curl -X POST http://localhost:3461/api/parallel \
+  -d '{"fromAgent":"chroma","toAgents":["pixel","canvas"],"task":"Create assets"}'</div>
+      </div>
+      <div class="endpoint">
+        <span class="method post">POST</span>
+        <span class="path">/conditional</span>
+        <div class="description">Conditional routing based on keywords</div>
+        <div class="example">curl -X POST http://localhost:3461/api/conditional \
+  -d '{"trigger":"Build website","condition":{"type":"keyword","keywords":["build"]},"ifTrue":"bender","ifFalse":"pixel"}'</div>
+      </div>
+      <div class="endpoint">
+        <span class="method post">POST</span>
+        <span class="path">/escalate/:handoffId</span>
+        <div class="description">Escalate stuck handoff up the chain</div>
+      </div>
+      <div class="endpoint">
+        <span class="method post">POST</span>
+        <span class="path">/schedule</span>
+        <div class="description">Schedule handoff for future execution</div>
+        <div class="example">curl -X POST http://localhost:3461/api/schedule \
+  -d '{"fromAgent":"chroma","toAgent":"bender","task":"Weekly report","scheduledAt":"2026-03-09T09:00:00Z"}'</div>
+      </div>
+      <div class="endpoint">
+        <span class="method post">POST</span>
+        <span class="path">/feedback/:handoffId</span>
+        <div class="description">Submit rating/feedback for completed handoff</div>
+      </div>
+    </div>
+
+    <!-- Context & History -->
+    <div class="endpoint-group">
+      <div class="group-header">Context & History</div>
+      <div class="endpoint">
+        <span class="method get">GET</span>
+        <span class="path">/history</span>
+        <div class="description">Query handoff history with filters</div>
+        <div class="example">curl "http://localhost:3461/api/history?agent=bender&limit=10"</div>
+      </div>
+      <div class="endpoint">
+        <span class="method get">GET</span>
+        <span class="path">/similar</span>
+        <div class="description">Find similar past tasks</div>
+        <div class="example">curl "http://localhost:3461/api/similar?task=build landing page"</div>
+      </div>
+      <div class="endpoint">
+        <span class="method get">GET</span>
+        <span class="path">/autocomplete</span>
+        <div class="description">Get task suggestion autocomplete</div>
+      </div>
+      <div class="endpoint">
+        <span class="method post">POST</span>
+        <span class="path">/context-aware</span>
+        <div class="description">Get agent context suggestions</div>
+      </div>
+    </div>
+
+    <!-- Dashboard & Metrics -->
+    <div class="endpoint-group">
+      <div class="group-header">Dashboard & Metrics</div>
+      <div class="endpoint">
+        <span class="method get">GET</span>
+        <span class="path">/dashboard</span>
+        <div class="description">Full dashboard with stats, agents, recent activity</div>
+        <div class="example">curl http://localhost:3461/api/dashboard</div>
+      </div>
+      <div class="endpoint">
+        <span class="method get">GET</span>
+        <span class="path">/metrics</span>
+        <div class="description">System metrics and analytics</div>
+      </div>
+    </div>
+
+    <!-- Files -->
+    <div class="endpoint-group">
+      <div class="group-header">File Upload</div>
+      <div class="endpoint">
+        <span class="method post">POST</span>
+        <span class="path">/upload</span>
+        <div class="description">Upload files (multipart/form-data)</div>
+        <div class="example">curl -X POST http://localhost:3461/api/upload -F "files=@design.pdf"</div>
+      </div>
+      <div class="endpoint">
+        <span class="method post">POST</span>
+        <span class="path">/handoff-with-files</span>
+        <div class="description">Create handoff with file attachments</div>
+      </div>
+      <div class="endpoint">
+        <span class="method get">GET</span>
+        <span class="path">/handoff/:id/deliverables</span>
+        <div class="description">Get files produced by a handoff/pipeline</div>
+      </div>
+    </div>
+
+    <!-- Pages -->
+    <div class="endpoint-group">
+      <div class="group-header">Web Pages</div>
+      <div class="endpoint">
+        <span class="method get">GET</span>
+        <span class="path"><a href="/dashboard">/dashboard</a></span>
+        <div class="description">Visual dashboard with live stats</div>
+      </div>
+    </div>
+
+    <p style="text-align: center; color: #666; margin-top: 3rem; font-size: 0.85rem;">
+      Server running on port 3461 | 
+      <a href="https://github.com/chromapages/agent-handoff-manager">Documentation</a>
+    </p>
+  </div>
+</body>
+</html>
