@@ -17,7 +17,7 @@ import {
 import '@xyflow/react/dist/style.css';
 
 import { useTheme } from '@/components/ThemeProvider';
-import { fetchAgents, fetchAllHandoffs, completeHandoff, escalateHandoff, submitFeedback } from '@/lib/api';
+import { fetchAgents, fetchAllHandoffs, completeHandoff, escalateHandoff, submitFeedback, WS_BASE } from '@/lib/api';
 import { AgentsMap, Handoff } from '@/lib/types';
 import { getLayoutedElements } from '@/lib/layout';
 import AgentNode from '@/components/workspace/AgentNode';
@@ -413,11 +413,7 @@ export default function WorkspacePage() {
 
         <Panel position="bottom-right" className="m-4">
           <ActivityFeed
-            wsUrl={
-              typeof window !== 'undefined'
-                ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://localhost:3461`
-                : (process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3461')
-            }
+            wsUrl={WS_BASE}
           />
         </Panel>
       </ReactFlow>

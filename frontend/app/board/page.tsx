@@ -11,6 +11,8 @@ import {
   fetchHandoffDeliverables,
   cancelHandoff,
   DeliverableFile,
+  WS_BASE,
+  API_ORIGIN,
 } from '@/lib/api';
 import { Handoff, Schedule, Automation } from '@/lib/types';
 import {
@@ -442,8 +444,7 @@ export default function BoardPage() {
     });
   }, []);
 
-  const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3461';
-  useWebSocket(wsUrl, handleWebSocketMessage);
+  useWebSocket(WS_BASE, handleWebSocketMessage);
 
   // ── Board handlers ────────────────────────────────────
   const handleDelete = useCallback(async (job: KanbanJob) => {
@@ -846,7 +847,7 @@ function DeliverablesModal({
     return '📁';
   };
 
-  const BASE_URL = 'http://localhost:3458';
+  const BASE_URL = API_ORIGIN;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>

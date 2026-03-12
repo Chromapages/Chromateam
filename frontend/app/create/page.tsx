@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { fetchAgents, createHandoff, createPipeline, fetchTemplates, executeTemplate } from '@/lib/api';
+import { fetchAgents, createHandoff, createPipeline, fetchTemplates, executeTemplate, API_BASE } from '@/lib/api';
 import { AgentsMap, CreateHandoffPayload, type Template } from '@/lib/types';
 import PageHeader from '@/components/PageHeader';
 import { GitBranch, ArrowRight, Plus, X, ChevronUp, ChevronDown, Play, Loader2, FileCode } from 'lucide-react';
@@ -220,7 +220,7 @@ export default function CreateHandoffPage() {
           formData.append('priority', priority);
           files.forEach((file) => formData.append('files', file));
 
-          const res = await fetch('http://localhost:3461/api/handoff-with-files', {
+          const res = await fetch(`${API_BASE}/handoff-with-files`, {
             method: 'POST',
             body: formData,
           });

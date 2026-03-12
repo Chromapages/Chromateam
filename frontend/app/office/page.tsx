@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { fetchAgents, fetchAgentStatus, fetchAllHandoffs } from '@/lib/api';
+import { fetchAgents, fetchAgentStatus, fetchAllHandoffs, WS_BASE } from '@/lib/api';
 import { AgentsMap, AgentStatus, Handoff } from '@/lib/types';
 import { useWebSocket } from '@/lib/useWebSocket';
 import PageHeader from '@/components/PageHeader';
@@ -711,8 +711,7 @@ export default function OfficePage() {
     }
   }, [agents]);
 
-  const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3461";
-  useWebSocket(wsUrl, handleWS);
+  useWebSocket(WS_BASE, handleWS);
 
   const agentEntries = Object.entries(agents);
   const statusValues = Object.values(statuses);

@@ -32,7 +32,9 @@ try { envApiUrl = decodeURIComponent(envApiUrl); } catch (e) {}
 const rawApiUrl = envApiUrl
   .replace(/^["']|["']$/g, '')
   .replace(/\/$/, '');
-const API_BASE = rawApiUrl.endsWith('/api') ? rawApiUrl : `${rawApiUrl}/api`;
+export const API_BASE = rawApiUrl.endsWith('/api') ? rawApiUrl : `${rawApiUrl}/api`;
+export const API_ORIGIN = rawApiUrl.replace(/\/api$/, '');
+export const WS_BASE = process.env.NEXT_PUBLIC_WS_URL || API_ORIGIN.replace(/^http/, 'ws');
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
