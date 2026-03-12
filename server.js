@@ -431,24 +431,12 @@ function initTemplates() {
 }
 initTemplates();
 
-// CORS - Allow specific origins for production
-const allowedOrigins = [
-  'http://localhost:3460',
-  'http://localhost:3000',
-  'https://team.chromapages.com',
-  'https://chromapages.com'
-];
-
+// CORS - Allow all origins for production (Vercel deployments)
 app.use(cors({
-  origin: function (origin, callback) {
-    // Allow requests with no origin (mobile apps, curl, etc.)
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) === -1) {
-      return callback(null, true); // Allow all for now, restrict in production if needed
-    }
-    return callback(null, true);
-  },
-  credentials: true
+  origin: true, // Allow all origins
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
 
