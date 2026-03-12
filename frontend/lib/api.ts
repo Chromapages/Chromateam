@@ -27,7 +27,10 @@ import {
   TemplateExecuteResponse
 } from './types';
 
-const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3461/api').replace(/\/$/, '');
+const rawApiUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3461/api')
+  .replace(/^["']|["']$/g, '')
+  .replace(/\/$/, '');
+const API_BASE = rawApiUrl.endsWith('/api') ? rawApiUrl : `${rawApiUrl}/api`;
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
