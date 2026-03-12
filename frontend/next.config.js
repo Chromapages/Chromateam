@@ -1,4 +1,9 @@
-const apiBaseUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3461/api').replace(/\/$/, '');
+// Strip any surrounding quotes Vercel/CI may inject, then normalize the origin
+// (remove a trailing /api so rewrites can append it cleanly).
+const rawApiUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3461/api')
+  .replace(/^["']|["']$/g, '') // strip surrounding quotes
+  .replace(/\/$/, '');           // strip trailing slash
+const apiOrigin = rawApiUrl.replace(/\/api$/, ''); // strip trailing /api if present
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -6,11 +11,11 @@ const nextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: `${apiBaseUrl}/api/:path*`,
+        destination: `${apiOrigin}/api/:path*`,
       },
       {
         source: '/ws-proxy',
-        destination: `${apiBaseUrl}/`,
+        destination: `${apiOrigin}/`,
       },
     ];
   },
