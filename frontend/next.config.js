@@ -1,6 +1,8 @@
 // Strip any surrounding quotes Vercel/CI may inject, then normalize the origin
 // (remove a trailing /api so rewrites can append it cleanly).
-const rawApiUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3461/api')
+let envApiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3461/api';
+try { envApiUrl = decodeURIComponent(envApiUrl); } catch (e) {}
+const rawApiUrl = envApiUrl
   .replace(/^["']|["']$/g, '') // strip surrounding quotes
   .replace(/\/$/, '');           // strip trailing slash
 const apiOrigin = rawApiUrl.replace(/\/api$/, ''); // strip trailing /api if present

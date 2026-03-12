@@ -27,7 +27,9 @@ import {
   TemplateExecuteResponse
 } from './types';
 
-const rawApiUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3461/api')
+let envApiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3461/api';
+try { envApiUrl = decodeURIComponent(envApiUrl); } catch (e) {}
+const rawApiUrl = envApiUrl
   .replace(/^["']|["']$/g, '')
   .replace(/\/$/, '');
 const API_BASE = rawApiUrl.endsWith('/api') ? rawApiUrl : `${rawApiUrl}/api`;
