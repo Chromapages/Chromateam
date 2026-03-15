@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; font-src 'self' https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:* wss://localhost:* http://localhost:* https://localhost:*; img-src 'self' data:; media-src *;">
+  <title>AHM — Marketing Hub</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#09090B">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/global-nav.css">
+  <link rel="stylesheet" href="css/ahm-design.css">
+  <style>
+    /* Tab system */
+    .tabs-bar { display: flex; border-bottom: 1px solid var(--rule); margin-bottom: 1.25rem; }
+    .tab-btn { font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding: .625rem 1rem; color: var(--text-muted); background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer; transition: color .15s, border-color .15s; margin-bottom: -1px; }
+    .tab-btn:hover { color: var(--text-secondary); }
+    .tab-btn.active { color: var(--amber); border-bottom-color: var(--amber); }
+
+    /* Command bar */
+    .cmd-bar { display: flex; align-items: center; gap: .75rem; padding: .625rem 1rem; background: var(--surface-1); border: 1px solid var(--rule); margin-bottom: 1.25rem; }
+    .cmd-cursor { font-family: var(--font-mono); font-size: 13px; color: var(--amber); font-weight: 700; animation: blink 1s step-end infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+    .cmd-input { flex: 1; background: transparent; border: none; outline: none; color: var(--text-primary); font-family: var(--font-mono); font-size: 12px; }
+
+    /* Two-column layout */
+    .mkt-layout { display: grid; grid-template-columns: 1fr; gap: 1.25rem; }
+    @media (min-width: 1024px) { .mkt-layout { grid-template-columns: 2fr 1fr; } }
+
+    /* Brand cards */
+    .brand-card { padding: 1rem; background: var(--surface-1); border: 1px solid var(--rule); cursor: pointer; display: flex; flex-direction: column; gap: .75rem; transition: border-color .15s; }
+    .brand-card:hover { border-color: var(--rule-thin); background: var(--surface-2); }
+    .brand-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1px; background: var(--rule); }
+    .brand-initial { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 10px; font-weight: 700; color: #fff; flex-shrink: 0; }
+    .color-row { display: flex; gap: .25rem; }
+    .color-swatch { width: 14px; height: 14px; border: 1px solid rgba(255,255,255,.1); }
+
+    /* Competitor cards */
+    .comp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1px; background: var(--rule); }
+    .comp-card { background: var(--surface-1); padding: 1.25rem; }
+    .comp-pill-list { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .375rem; }
+
+    /* Deliverable cards */
+    .deliv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1px; background: var(--rule); }
+    .deliv-card { background: var(--surface-1); padding: 1.25rem; display: flex; flex-direction: column; gap: .75rem; }
+    .deliv-content { font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary); line-height: 1.5; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; }
+
+    /* Ledger */
+    .ledger-hd { display: grid; grid-template-columns: 80px 1fr 100px 80px 100px; gap: 1rem; padding: .375rem 1rem; border-bottom: 1px solid var(--rule); background: var(--surface-2); }
+    .ledger-row { display: grid; grid-template-columns: 80px 1fr 100px 80px 100px; align-items: center; gap: 1rem; padding: .625rem 1rem; background: var(--surface-1); border-bottom: 1px solid var(--rule); font-size: 11px; transition: background .1s; }
+    .ledger-row:hover { background: var(--surface-2); }
+    .ledger-hd span { font-family: var(--font-mono); font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); }
+
+    /* Mission feed */
+    .feed-item { padding: .625rem .875rem; border-left: 2px solid var(--surface-3); background: var(--surface-1); margin-bottom: 1px; }
+    .feed-time { font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); display: block; margin-bottom: .25rem; }
+    .feed-msg { font-family: var(--font-mono); font-size: 10px; line-height: 1.4; color: var(--text-secondary); }
+
+    /* Deploy form */
+    label.field-label { font-family: var(--font-mono); font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--text-secondary); display: block; margin-bottom: .25rem; }
+
+    /* Preview drawer */
+    .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(450px, 100vw); background: var(--surface-1); border-left: 1px solid var(--rule); z-index: 200; transform: translateX(100%); transition: transform .35s cubic-bezier(.16,1,.3,1); padding: 2rem; overflow-y: auto; }
+    .drawer.open { transform: translateX(0); }
+    .drawer-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 199; display: none; }
+    .drawer-overlay.show { display: block; }
+
+    /* Modals */
+    .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.8); z-index: 100; display: none; align-items: center; justify-content: center; padding: 1rem; }
+    .modal-bg.open { display: flex; }
+    .modal-panel { background: var(--surface-1); border: 1px solid var(--rule); width: 100%; max-width: 480px; padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
+    .modal-title { font-family: var(--font-mono); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--amber); }
+    .form-submit { width: 100%; background: var(--amber); color: #000; padding: .75rem; font-family: var(--font-mono); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; border: none; cursor: pointer; transition: opacity .15s; }
+    .form-submit:hover { opacity: .85; }
+  </style>
+</head>
+<body class="ahm-page">
+
+  <div class="ahm-accent-bar"></div>
+
+  <header class="ahm-header">
+    <div class="ahm-header-logo">
+      AHM<span style="color:var(--amber)">.</span>
+      <span class="ahm-header-sep"></span>
+      <span class="ahm-header-title">Marketing Hub</span>
+    </div>
+    <div class="ahm-header-spacer"></div>
+    <div class="ahm-header-actions">
+      <select id="projectSelect" onchange="onProjectChange()" style="background:var(--surface-2);border:1px solid var(--rule);color:var(--text-primary);padding:6px 10px;border-radius:4px;font-family:var(--font-mono);font-size:11px;">
+        <option value="">Select Project</option>
+      </select>
+      <button class="btn btn-sm" onclick="openLaunchCampaign()" style="background:var(--amber);color:#000;font-weight:700;">🎬 Launch Campaign</button>
+      <div class="conn-badge" onclick="location.href='/approvals'" style="cursor:pointer;">
+        <span class="conn-dot" id="approvalDot"></span>
+        <span style="font-family:var(--font-mono);font-size:9px;font-weight:700;color:var(--text-secondary)" id="approvalLabel">0 Pending</span>
+      </div>
+      <div class="conn-badge">
+        <span class="conn-dot dead" id="connDot"></span>
+        <span style="font-family:var(--font-mono);font-size:9px;font-weight:700;color:var(--text-secondary)" id="connLabel">CONNECTING</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="page-wrap" style="padding-top:1.25rem;padding-bottom:1.25rem;">
+
+    <!-- METRICS ROW -->
+    <div class="metrics-row" style="margin-bottom:1.25rem;">
+      <div class="metric-card mc-blue">
+        <div class="metric-label">Active Requests</div>
+        <div class="metric-value mv-blue" id="activeCount">0</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Managed Brands</div>
+        <div class="metric-value" id="brandCount">0</div>
+      </div>
+      <div class="metric-card mc-amber">
+        <div class="metric-label">Competitor Intel</div>
+        <div class="metric-value mv-amber" id="competitorCount">0</div>
+      </div>
+      <div class="metric-card mc-green">
+        <div class="metric-label">Deliverables</div>
+        <div class="metric-value mv-green" id="deliverableCount">0</div>
+      </div>
+    </div>
+
+    <!-- COMMAND BAR -->
+    <div class="cmd-bar">
+      <span class="cmd-cursor">_</span>
+      <input type="text" id="commandInput" class="cmd-input" placeholder="/marketing request SEO audit for brand...">
+      <button class="btn btn-ghost btn-sm" onclick="handleCommand()">EXEC ⏎</button>
+    </div>
+
+    <!-- TABS -->
+    <div class="tabs-bar">
+      <button class="tab-btn active" onclick="switchInnerTab('brands', this)">Brands</button>
+      <button class="tab-btn" onclick="switchInnerTab('competitors', this)">Competitors</button>
+      <button class="tab-btn" onclick="switchInnerTab('deliverables', this)">Deliverables</button>
+      <button class="tab-btn" onclick="switchInnerTab('ledger', this)">Ledger</button>
+    </div>
+
+    <!-- MAIN LAYOUT -->
+    <div class="mkt-layout">
+
+      <!-- LEFT: tab content -->
+      <div>
+
+        <!-- TAB: BRANDS -->
+        <div id="inner-brands">
+          <div class="panel" style="margin-bottom:1.25rem;">
+            <div class="panel-header">
+              <span style="font-family:var(--font-mono);font-size:10px;font-weight:700;color:var(--text-primary)">Deploy Marketing Agent</span>
+              <span style="font-family:var(--font-mono);font-size:9px;color:var(--amber)">Secure Terminal</span>
+            </div>
+            <div class="panel-body" style="padding:1rem;">
+              <form id="requestForm" style="display:flex;flex-direction:column;gap:.75rem;">
+                <div>
+                  <label class="field-label">Task Type</label>
+                  <select id="requestType" class="field">
+                    <option value="">Select Task Type…</option>
+                    <option value="seo">SEO Audit</option>
+                    <option value="ad-campaign">Ad Campaign</option>
+                    <option value="email">Email Campaign</option>
+                    <option value="social">Social Content</option>
+                    <option value="competitor">Competitor Research</option>
+                    <option value="content">Content Writing</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="field-label">Target Brand</label>
+                  <select id="brandSelect" class="field">
+                    <option value="">Select Target Brand…</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="field-label">Priority</label>
+                  <select id="priority" class="field">
+                    <option value="low">LOW</option>
+                    <option value="medium" selected>MEDIUM</option>
+                    <option value="high">HIGH</option>
+                    <option value="urgent">URGENT</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="field-label">Mission Briefing</label>
+                  <textarea id="notes" class="field" rows="3" style="resize:none" placeholder="Additional notes…"></textarea>
+                </div>
+                <button type="submit" class="form-submit">Initialize Mission</button>
+              </form>
+            </div>
+          </div>
+
+          <div class="section-hd">
+            <span class="section-hd-label">Brand Vault</span>
+            <span class="section-hd-rule"></span>
+            <button onclick="showAddBrand()" class="btn btn-ghost btn-sm">+ Add Brand</button>
+          </div>
+          <div id="brandsGrid" class="brand-grid" style="margin-top:.5rem;">
+            <div class="empty-state">Loading brand data…</div>
+          </div>
+        </div>
+
+        <!-- TAB: COMPETITORS -->
+        <div id="inner-competitors" style="display:none;">
+          <div class="section-hd">
+            <span class="section-hd-label">Competitor Intel</span>
+            <span class="section-hd-rule"></span>
+            <button onclick="scanCompetitors()" class="btn btn-amber btn-sm">Initialize Scan</button>
+          </div>
+          <div id="competitorsGrid" class="comp-grid" style="margin-top:.5rem;">
+            <div class="empty-state">Awaiting scan results…</div>
+          </div>
+        </div>
+
+        <!-- TAB: DELIVERABLES -->
+        <div id="inner-deliverables" style="display:none;">
+          <div class="section-hd">
+            <span class="section-hd-label">Deliverables</span>
+            <span class="section-hd-rule"></span>
+          </div>
+          <div id="deliverablesGrid" class="deliv-grid" style="margin-top:.5rem;">
+            <div class="empty-state">No deliverables awaiting review</div>
+          </div>
+        </div>
+
+        <!-- TAB: LEDGER -->
+        <div id="inner-ledger" style="display:none;">
+          <div class="section-hd">
+            <span class="section-hd-label">Operational Ledger</span>
+            <span class="section-hd-rule"></span>
+            <span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted)" id="ledger-sync-time">—</span>
+          </div>
+          <div class="panel" style="margin-top:.5rem;">
+            <div class="ledger-hd">
+              <span>Time</span><span>Mission</span><span>Agent</span><span>Priority</span><span>Status</span>
+            </div>
+            <div id="ledgerContent">
+              <div class="empty-state">Syncing ledger…</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- RIGHT: Mission feed (always visible) -->
+      <div>
+        <div class="section-hd">
+          <span class="section-hd-label">Mission Feed</span>
+          <span class="section-hd-rule"></span>
+        </div>
+        <div id="activityFeed" style="margin-top:.5rem;">
+          <div class="empty-state">Connecting to feed…</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- PREVIEW DRAWER -->
+  <div id="drawerOverlay" class="drawer-overlay" onclick="closeDrawer()"></div>
+  <div id="previewDrawer" class="drawer">
+    <div id="drawerContent"></div>
+  </div>
+
+  <!-- LAUNCH CAMPAIGN MODAL -->
+  <div id="launchCampaignModal" class="modal-bg" onclick="if(event.target===this)closeLaunchCampaign()">
+    <div class="modal-panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="modal-title">🎬 Launch Marketing Campaign</span>
+        <button onclick="closeLaunchCampaign()" class="btn btn-ghost btn-icon">✕</button>
+      </div>
+      <form id="launchCampaignForm" style="display:flex;flex-direction:column;gap:.625rem;">
+        <label class="field-label">Project</label>
+        <select id="campaignProject" class="field" required>
+          <option value="">Select project...</option>
+        </select>
+        <label class="field-label">Campaign Type</label>
+        <select id="campaignType" class="field" required>
+          <option value="ad_creative">Ad Creative</option>
+          <option value="email_sequence">Email Sequence</option>
+          <option value="landing_page">Landing Page</option>
+          <option value="social_content">Social Media Content</option>
+          <option value="video_ad">Video Ad</option>
+          <option value="brand_design">Brand Design</option>
+        </select>
+        <label class="field-label">Task Description</label>
+        <textarea id="campaignTask" class="field" rows="3" style="resize:none" placeholder="What do you need created? (e.g., 'Create 5 ad variations for UNT tax services targeting small business owners')" required></textarea>
+        <label class="field-label">Context / Constraints</label>
+        <input id="campaignContext" class="field" placeholder="Any specific requirements, tone, audience...">
+        <button type="submit" class="form-submit">🚀 Launch Campaign</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ADD COMPETITOR MODAL -->
+  <div id="addCompetitorModal" class="modal-bg" onclick="if(event.target===this)closeAddCompetitor()">
+    <div class="modal-panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="modal-title">Add Competitor</span>
+        <button onclick="closeAddCompetitor()" class="btn btn-ghost btn-icon">✕</button>
+      </div>
+      <form id="addCompetitorForm" style="display:flex;flex-direction:column;gap:.625rem;">
+        <input id="compName" class="field" placeholder="Competitor Name *" required>
+        <input id="compWebsite" class="field" placeholder="Website (e.g. competitor.com)">
+        <input id="compStrengths" class="field" placeholder="Strengths (comma-separated)">
+        <input id="compWeaknesses" class="field" placeholder="Weaknesses (comma-separated)">
+        <textarea id="compNotes" class="field" rows="2" style="resize:none" placeholder="Analyst notes…"></textarea>
+        <button type="submit" class="form-submit">Add to Intel Database</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ADD BRAND MODAL -->
+  <div id="addBrandModal" class="modal-bg" onclick="if(event.target===this)closeAddBrand()">
+    <div class="modal-panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="modal-title" style="color:var(--blue)">Register Brand</span>
+        <button onclick="closeAddBrand()" class="btn btn-ghost btn-icon">✕</button>
+      </div>
+      <form id="addBrandForm" style="display:flex;flex-direction:column;gap:.625rem;">
+        <input id="brandName" class="field" placeholder="Brand Name *" required>
+        <div style="display:flex;gap:1rem;align-items:center;">
+          <label style="font-family:var(--font-mono);font-size:9px;color:var(--text-secondary);">Primary</label>
+          <input id="brandPrimary" type="color" value="#E11934" style="width:36px;height:28px;border:1px solid var(--rule);background:none;cursor:pointer;">
+          <label style="font-family:var(--font-mono);font-size:9px;color:var(--text-secondary);">Secondary</label>
+          <input id="brandSecondary" type="color" value="#1D6FA4" style="width:36px;height:28px;border:1px solid var(--rule);background:none;cursor:pointer;">
+        </div>
+        <button type="submit" class="form-submit">Register Brand</button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    let brands = [];
+
+    // ── Tabs ──
+    function switchInnerTab(tab, btn) {
+      const tabs = ['brands', 'competitors', 'deliverables', 'ledger'];
+      tabs.forEach(t => {
+        const el = document.getElementById('inner-' + t);
+        if (el) el.style.display = (t === tab) ? 'block' : 'none';
+      });
+      document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+      if (tab === 'ledger') loadLedger();
+      if (tab === 'competitors') loadCompetitors();
+    }
+
+    // ── WebSocket ──
+    function connectWebSocket() {
+      const ws = new WebSocket(`ws://${window.location.host}`);
+      ws.onopen = () => {
+        document.getElementById('connDot').className = 'conn-dot live';
+        document.getElementById('connLabel').textContent = 'LIVE';
+      };
+      ws.onclose = () => {
+        document.getElementById('connDot').className = 'conn-dot dead';
+        document.getElementById('connLabel').textContent = 'OFFLINE';
+      };
+    }
+
+    // ── Brands ──
+    async function loadBrands() {
+      try {
+        const res = await fetch('/api/marketing/brands');
+        const data = await res.json();
+        brands = data.brands || [];
+        document.getElementById('brandCount').textContent = brands.length;
+        document.getElementById('brandSelect').innerHTML = '<option value="">Select Target Brand…</option>' +
+          brands.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
+        const grid = document.getElementById('brandsGrid');
+        if (brands.length === 0) {
+          grid.innerHTML = '<div class="empty-state">No brands registered</div>';
+          return;
+        }
+        grid.innerHTML = brands.map(b => `
+          <div class="brand-card" onclick="alert('Brand: ${b.name}')">
+            <div style="display:flex;align-items:center;gap:.625rem;">
+              <div class="brand-initial" style="background:${b.colors?.primary || '#3B82F6'}">${b.name.charAt(0)}</div>
+              <div>
+                <div style="font-family:var(--font-mono);font-size:11px;font-weight:700;color:var(--text-primary);text-transform:uppercase">${b.name}</div>
+                <div style="font-family:var(--font-mono);font-size:8px;color:var(--text-muted);margin-top:1px">${b.tone || 'Neutral Tone'}</div>
+              </div>
+            </div>
+            <div class="color-row">
+              <div class="color-swatch" style="background:${b.colors?.primary}"></div>
+              <div class="color-swatch" style="background:${b.colors?.secondary}"></div>
+            </div>
+          </div>`).join('');
+      } catch (e) { console.error(e); }
+    }
+
+    // ── Competitors ──
+    async function loadCompetitors() {
+      try {
+        const res = await fetch('/api/marketing/competitors');
+        const data = await res.json();
+        const competitors = data.competitors || [];
+        document.getElementById('competitorCount').textContent = competitors.length;
+        const grid = document.getElementById('competitorsGrid');
+        if (competitors.length === 0) {
+          grid.innerHTML = '<div class="empty-state">Scan required to detect market movement</div>';
+          return;
+        }
+        grid.innerHTML = competitors.map(c => {
+          const strengths = Array.isArray(c.strengths) ? c.strengths : [];
+          const weaknesses = Array.isArray(c.weaknesses) ? c.weaknesses : [];
+          return `
+            <div class="comp-card">
+              <div style="margin-bottom:.75rem;">
+                <div style="font-family:var(--font-mono);font-size:8px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.25rem">Target Detected</div>
+                <div style="font-family:var(--font-mono);font-size:13px;font-weight:700;color:var(--text-primary);text-transform:uppercase">${c.name || 'Unknown'}</div>
+                <a href="${c.website || '#'}" target="_blank" style="font-family:var(--font-mono);font-size:9px;color:var(--blue)">${c.website || 'No website'}</a>
+              </div>
+              <div style="margin-bottom:.625rem;">
+                <div style="font-family:var(--font-mono);font-size:8px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:.25rem">Strengths</div>
+                <div class="comp-pill-list">
+                  ${strengths.map(s => `<span class="pill pill-done">${s}</span>`).join('') || '<span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted)">Discovery in progress…</span>'}
+                </div>
+              </div>
+              <div style="margin-bottom:.625rem;">
+                <div style="font-family:var(--font-mono);font-size:8px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:.25rem">Weaknesses</div>
+                <div class="comp-pill-list">
+                  ${weaknesses.map(w => `<span class="pill pill-blocked">${w}</span>`).join('') || '<span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted)">Discovery in progress…</span>'}
+                </div>
+              </div>
+              ${c.notes ? `<div style="font-family:var(--font-mono);font-size:10px;color:var(--text-secondary);border-top:1px solid var(--rule);padding-top:.5rem;margin-top:.25rem;line-height:1.5">${c.notes}</div>` : ''}
+            </div>`;
+        }).join('');
+      } catch (e) { console.error(e); }
+    }
+
+    // ── Deliverables ──
+    async function loadDeliverables() {
+      try {
+        const res = await fetch('/api/marketing/deliverables');
+        const data = await res.json();
+        const deliverables = data.deliverables || [];
+        document.getElementById('deliverableCount').textContent = deliverables.filter(d => d.status === 'pending_review').length;
+        const grid = document.getElementById('deliverablesGrid');
+        if (deliverables.length === 0) {
+          grid.innerHTML = '<div class="empty-state">Intelligence inbox empty</div>';
+          return;
+        }
+        grid.innerHTML = deliverables.map(d => {
+          const pillCls = d.status === 'pending_review' ? 'pill-pending' : d.status === 'approved' ? 'pill-done' : 'pill-blocked';
+          return `
+            <div class="deliv-card">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                <div>
+                  <div style="font-family:var(--font-mono);font-size:8px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:.25rem">${d.type}</div>
+                  <div style="font-family:var(--font-mono);font-size:12px;font-weight:700;color:var(--text-primary);text-transform:uppercase">${d.name}</div>
+                </div>
+                <span class="pill ${pillCls}">${d.status}</span>
+              </div>
+              <div class="deliv-content">${d.content}</div>
+              <div style="display:flex;gap:.5rem;">
+                <button onclick="previewDeliverable('${d.id}')" class="btn btn-ghost btn-sm flex-1">Preview</button>
+                ${d.status === 'pending_review' ? `<button onclick="reviewD('${d.id}', 'approve')" class="btn btn-approve btn-sm">Approve</button>` : ''}
+              </div>
+            </div>`;
+        }).join('');
+      } catch (e) { console.error(e); }
+    }
+
+    // ── Preview Drawer ──
+    async function previewDeliverable(id) {
+      try {
+        const res = await fetch('/api/marketing/deliverables');
+        const data = await res.json();
+        const d = data.deliverables.find(item => item.id === id);
+        if (!d) return;
+        const drawer = document.getElementById('previewDrawer');
+        const content = document.getElementById('drawerContent');
+        content.innerHTML = `
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1.5rem;">
+            <div>
+              <div style="font-family:var(--font-mono);font-size:8px;color:var(--text-muted);text-transform:uppercase;margin-bottom:.375rem">Asset ID: ${d.id}</div>
+              <div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:var(--text-primary);text-transform:uppercase">${d.name}</div>
+            </div>
+            <button onclick="closeDrawer()" class="btn btn-ghost btn-icon">✕</button>
+          </div>
+          <div style="background:var(--surface-2);border:1px solid var(--rule);padding:1rem;font-family:var(--font-mono);font-size:11px;line-height:1.6;color:var(--text-secondary);white-space:pre-wrap;margin-bottom:1rem;">${d.content}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;">
+            <div style="background:var(--surface-2);border:1px solid var(--rule);padding:.75rem;">
+              <div style="font-family:var(--font-mono);font-size:8px;color:var(--text-muted);text-transform:uppercase;margin-bottom:.25rem">Created</div>
+              <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-primary)">${new Date(d.createdAt).toLocaleString()}</div>
+            </div>
+            <div style="background:var(--surface-2);border:1px solid var(--rule);padding:.75rem;">
+              <div style="font-family:var(--font-mono);font-size:8px;color:var(--text-muted);text-transform:uppercase;margin-bottom:.25rem">Type</div>
+              <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-primary)">${d.type}</div>
+            </div>
+          </div>`;
+        drawer.classList.add('open');
+        document.getElementById('drawerOverlay').classList.add('show');
+        document.body.style.overflow = 'hidden';
+      } catch (e) { console.error(e); }
+    }
+
+    function closeDrawer() {
+      document.getElementById('previewDrawer').classList.remove('open');
+      document.getElementById('drawerOverlay').classList.remove('show');
+      document.body.style.overflow = '';
+    }
+
+    // ── Activity Feed ──
+    async function loadActivity() {
+      try {
+        const res = await fetch('/api/marketing/activity');
+        const data = await res.json();
+        const activity = data.activity || [];
+        document.getElementById('activeCount').textContent = activity.filter(a => a.status === 'in_progress').length;
+        const feed = document.getElementById('activityFeed');
+        if (activity.length === 0) {
+          feed.innerHTML = '<div class="empty-state">No movements detected</div>';
+          return;
+        }
+        feed.innerHTML = activity.slice(0, 15).map(a => `
+          <div class="feed-item" style="border-left-color:${a.status === 'completed' ? 'var(--green)' : a.status === 'failed' ? 'var(--red)' : 'var(--blue)'}">
+            <span class="feed-time">${new Date(a.timestamp).toLocaleTimeString()}</span>
+            <div class="feed-msg">
+              <span style="color:var(--text-primary)">AGENT::${(a.agent || 'SYSTEM').toUpperCase()}</span>
+              <span style="margin-left:.25rem">${a.taskType || a.type}</span>
+              ${a.data?.name ? `<span style="display:block;font-size:9px;color:var(--text-muted);margin-top:2px">${a.data.name}</span>` : ''}
+            </div>
+          </div>`).join('');
+      } catch (e) { console.error(e); }
+    }
+
+    // ── Ledger ──
+    async function loadLedger() {
+      try {
+        const [reqRes, handoffRes] = await Promise.all([
+          fetch('/api/marketing/requests'),
+          fetch('/api/handoffs')
+        ]);
+        const reqData = await reqRes.json();
+        const handoffData = await handoffRes.json();
+        renderLedger(reqData.requests || [], handoffData.handoffs || []);
+        document.getElementById('ledger-sync-time').textContent = new Date().toLocaleTimeString();
+      } catch (e) { console.error('Ledger sync failed:', e); }
+    }
+
+    function renderLedger(requests, handoffs) {
+      const container = document.getElementById('ledgerContent');
+      if (requests.length === 0) {
+        container.innerHTML = '<div class="empty-state">No operations recorded</div>';
+        return;
+      }
+      const sorted = [...requests].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      container.innerHTML = sorted.map(req => {
+        const handoff = handoffs.find(h => h.id === req.handoffId);
+        const status = handoff ? handoff.status : req.status;
+        const pillCls = status === 'completed' ? 'pill-done' :
+                        status === 'pending'   ? 'pill-pending' :
+                        (status === 'in_progress' || status === 'active') ? 'pill-active' : 'pill-blocked';
+        const brandObj = Array.isArray(brands) ? brands.find(b => b.id === req.brandId) : null;
+        const brandName = brandObj ? brandObj.name : (req.brandId ? 'BRAND' : 'GEN');
+        return `
+          <div class="ledger-row">
+            <span style="font-family:var(--font-mono);font-size:9px;color:var(--text-secondary)">${new Date(req.createdAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span>
+            <div>
+              <div style="font-family:var(--font-mono);font-size:11px;font-weight:700;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${req.title}</div>
+              <div style="font-family:var(--font-mono);font-size:8px;color:var(--text-muted);margin-top:1px">[${brandName}] ${req.type}</div>
+            </div>
+            <span style="font-family:var(--font-mono);font-size:9px;color:var(--text-secondary)">${req.assignedAgent ? req.assignedAgent.split('-')[0] : '—'}</span>
+            <span style="font-family:var(--font-mono);font-size:9px;color:${req.priority === 'urgent' ? 'var(--red)' : 'var(--text-secondary)'};text-transform:uppercase">${req.priority}</span>
+            <span class="pill ${pillCls}">${status || 'UNKNOWN'}</span>
+          </div>`;
+      }).join('');
+    }
+
+    // ── Request Form ──
+    document.getElementById('requestForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const payload = {
+        type: document.getElementById('requestType').value,
+        brandId: document.getElementById('brandSelect').value || null,
+        priority: document.getElementById('priority').value,
+        notes: document.getElementById('notes').value
+      };
+      if (!payload.type) return alert('Select Type');
+      const res = await fetch('/api/marketing/requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        alert('Mission Initialized');
+        document.getElementById('requestForm').reset();
+        loadActivity();
+        loadLedger();
+      }
+    });
+
+    // ── Competitor Modal ──
+    function scanCompetitors() {
+      document.getElementById('addCompetitorModal').classList.add('open');
+    }
+    function closeAddCompetitor() {
+      document.getElementById('addCompetitorModal').classList.remove('open');
+      document.getElementById('addCompetitorForm').reset();
+    }
+
+    // ── Brand Modal ──
+    function showAddBrand() {
+      document.getElementById('addBrandModal').classList.add('open');
+    }
+    function closeAddBrand() {
+      document.getElementById('addBrandModal').classList.remove('open');
+      document.getElementById('addBrandForm').reset();
+    }
+
+    // ── Deliverable Review ──
+    async function reviewD(deliverableId, action) {
+      try {
+        const res = await fetch('/api/marketing/deliverables', { headers: { 'Content-Type': 'application/json' } });
+        const data = await res.json();
+        const d = (data.deliverables || []).find(item => item.id === deliverableId);
+        if (!d) return;
+        await fetch(`/api/marketing/requests/${d.requestId}/${action}`, { method: 'POST' });
+        loadDeliverables();
+        loadLedger();
+      } catch (err) { console.error('Review failed:', err); }
+    }
+
+    // ── Command Bar ──
+    function handleCommand() {
+      const cmd = document.getElementById('commandInput').value;
+      if (cmd) {
+        alert('Processing Command: ' + cmd);
+        document.getElementById('commandInput').value = '';
+      }
+    }
+
+    // ── Project Integration ──
+    let currentProjectId = '';
+    
+    async function loadProjects() {
+      try {
+        const res = await fetch('/api/projects');
+        const data = await res.json();
+        const projects = data.projects || [];
+        const options = '<option value="">All Projects</option>' + 
+          projects.map(p => `<option value="${p.id}">${p.name} (${p.clientId})</option>`).join('');
+        document.getElementById('projectSelect').innerHTML = options;
+        document.getElementById('campaignProject').innerHTML = 
+          '<option value="">Select project...</option>' +
+          projects.map(p => `<option value="${p.id}">${p.name} (${p.clientId})</option>`).join('');
+      } catch (e) { console.error('Failed to load projects:', e); }
+    }
+
+    async function loadApprovals() {
+      try {
+        const res = await fetch('/api/approvals');
+        const data = await res.json();
+        const pending = (data.approvals || []).length;
+        document.getElementById('approvalLabel').textContent = pending + ' Pending';
+        const dot = document.getElementById('approvalDot');
+        if (pending > 0) {
+          dot.className = 'conn-dot live';
+          dot.style.background = 'var(--amber)';
+        } else {
+          dot.className = 'conn-dot';
+        }
+      } catch (e) { console.error('Failed to load approvals:', e); }
+    }
+
+    function onProjectChange() {
+      currentProjectId = document.getElementById('projectSelect').value;
+      // Filter displayed data by project if needed
+      console.log('Project changed:', currentProjectId);
+    }
+
+    // ── Launch Campaign ──
+    function openLaunchCampaign() {
+      document.getElementById('launchCampaignModal').classList.add('open');
+    }
+    function closeLaunchCampaign() {
+      document.getElementById('launchCampaignModal').classList.remove('open');
+      document.getElementById('launchCampaignForm').reset();
+    }
+
+    document.getElementById('launchCampaignForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const projectId = document.getElementById('campaignProject').value;
+      const task = document.getElementById('campaignTask').value.trim();
+      const context = document.getElementById('campaignContext').value.trim();
+      
+      if (!projectId || !task) {
+        alert('Please select a project and enter a task');
+        return;
+      }
+
+      // Get client from project
+      let clientId = '';
+      try {
+        const projRes = await fetch(`/api/projects/${projectId}/details`);
+        const projData = await projRes.json();
+        clientId = projData.project?.clientId || '';
+      } catch (e) {
+        console.error('Failed to get project:', e);
+      }
+
+      try {
+        const res = await fetch('/api/service-template/marketing/launch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            task,
+            context,
+            projectId,
+            client: clientId,
+            runAsync: true
+          })
+        });
+        const result = await res.json();
+        if (result.success) {
+          alert('Campaign launched! Pipeline ID: ' + result.pipelineId);
+          closeLaunchCampaign();
+          loadActivity();
+        } else {
+          alert('Failed: ' + (result.error || 'Unknown error'));
+        }
+      } catch (e) {
+        alert('Error launching campaign: ' + e.message);
+      }
+    });
+
+    // ── Init ──
+    document.addEventListener('DOMContentLoaded', () => {
+      connectWebSocket();
+      loadProjects();
+      loadApprovals();
+      loadBrands();
+      loadCompetitors();
+      loadDeliverables();
+      loadActivity();
+      loadLedger();
+      setInterval(loadActivity, 10000);
+      setInterval(loadLedger, 30000);
+      setInterval(loadApprovals, 30000);
+
+      document.getElementById('addCompetitorForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = document.getElementById('compName').value.trim();
+        const website = document.getElementById('compWebsite').value.trim();
+        const strengthsRaw = document.getElementById('compStrengths').value.trim();
+        const weaknessesRaw = document.getElementById('compWeaknesses').value.trim();
+        const notes = document.getElementById('compNotes').value.trim();
+        if (!name) return;
+        const body = {
+          name,
+          website: website || (name.includes('.') ? `https://${name}` : `https://${name.toLowerCase().replace(/\s+/g,'')}.com`),
+          strengths: strengthsRaw ? strengthsRaw.split(',').map(s => s.trim()).filter(Boolean) : [],
+          weaknesses: weaknessesRaw ? weaknessesRaw.split(',').map(s => s.trim()).filter(Boolean) : [],
+          notes
+        };
+        try {
+          const res = await fetch('/api/marketing/competitors', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+          });
+          if (res.ok) { closeAddCompetitor(); loadCompetitors(); }
+        } catch (err) { console.error('Add competitor failed:', err); }
+      });
+
+      document.getElementById('addBrandForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = document.getElementById('brandName').value.trim();
+        const primary = document.getElementById('brandPrimary').value || '#E11934';
+        const secondary = document.getElementById('brandSecondary').value || '#1D6FA4';
+        if (!name) return;
+        try {
+          const res = await fetch('/api/marketing/brands', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, colors: { primary, secondary } })
+          });
+          if (res.ok) { closeAddBrand(); loadBrands(); }
+        } catch (err) { console.error('Add brand failed:', err); }
+      });
+    });
+  </script>
+
+  <!-- PWA Service Worker -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(err => console.warn('[AHM] SW:', err));
+      });
+    }
+  </script>
+
+  <script src="js/global-nav.js"></script>
+</body>
+</html>
