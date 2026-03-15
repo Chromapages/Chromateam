@@ -28,6 +28,7 @@ const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { DatabaseSync } = require('node:sqlite');
 const config = require('./config');
 const crmRouter = require('./crm/index');
 
@@ -107,12 +108,174 @@ function ensureDataDir() {
   }
 }
 
+const SQLITE_DB_FILE = path.join(__dirname, 'data', 'ahm.sqlite');
+let persistenceDb = null;
+
+function getDb() {
+  ensureDataDir();
+  if (!persistenceDb) {
+    persistenceDb = new DatabaseSync(SQLITE_DB_FILE);
+    persistenceDb.exec(`
+      PRAGMA journal_mode = WAL;
+      PRAGMA foreign_keys = ON;
+      CREATE TABLE IF NOT EXISTS handoffs (
+        id TEXT PRIMARY KEY,
+        json TEXT NOT NULL,
+        client TEXT,
+        status TEXT,
+        from_agent TEXT,
+        to_agent TEXT,
+        pipeline_id TEXT,
+        updated_at TEXT,
+        created_at TEXT
+      );
+      CREATE TABLE IF NOT EXISTS tasks (
+        id TEXT PRIMARY KEY,
+        json TEXT NOT NULL,
+        client TEXT,
+        column_id TEXT,
+        owner TEXT,
+        priority TEXT,
+        updated_at TEXT,
+        created_at TEXT
+      );
+      CREATE TABLE IF NOT EXISTS clients (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        status TEXT DEFAULT 'active',
+        metadata_json TEXT DEFAULT '{}',
+        created_at TEXT,
+        updated_at TEXT
+      );
+      CREATE TABLE IF NOT EXISTS projects (
+        id TEXT PRIMARY KEY,
+        client_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        status TEXT DEFAULT 'active',
+        lead_agent TEXT,
+        output_path TEXT,
+        metadata_json TEXT DEFAULT '{}',
+        created_at TEXT,
+        updated_at TEXT,
+        FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_handoffs_client_status ON handoffs(client, status);
+      CREATE INDEX IF NOT EXISTS idx_tasks_client_column ON tasks(client, column_id);
+      CREATE INDEX IF NOT EXISTS idx_projects_client_id ON projects(client_id);
+    `);
+  }
+  return persistenceDb;
+}
+
+function upsertHandoffRecord(handoff) {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO handoffs (id, json, client, status, from_agent, to_agent, pipeline_id, updated_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      json=excluded.json,
+      client=excluded.client,
+      status=excluded.status,
+      from_agent=excluded.from_agent,
+      to_agent=excluded.to_agent,
+      pipeline_id=excluded.pipeline_id,
+      updated_at=excluded.updated_at,
+      created_at=excluded.created_at
+  `).run(
+    handoff.id,
+    JSON.stringify(handoff),
+    handoff.client || null,
+    handoff.status || null,
+    handoff.fromAgent || null,
+    handoff.toAgent || null,
+    handoff.pipelineId || null,
+    handoff.completedAt || handoff.responseAt || handoff.startedAt || handoff.updatedAt || handoff.createdAt || new Date().toISOString(),
+    handoff.createdAt || new Date().toISOString()
+  );
+}
+
+function upsertTaskRecord(task) {
+  const db = getDb();
+  db.prepare(`INSERT INTO tasks (id, json, client, column_id, owner, priority, updated_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      json=excluded.json,
+      client=excluded.client,
+      column_id=excluded.column_id,
+      owner=excluded.owner,
+      priority=excluded.priority,
+      updated_at=excluded.updated_at,
+      created_at=excluded.created_at`).run(
+        task.id,
+        JSON.stringify(task),
+        task.client || null,
+        task.column || null,
+        task.owner || null,
+        task.priority || null,
+        task.updatedAt || task.createdAt || new Date().toISOString(),
+        task.createdAt || new Date().toISOString()
+      );
+}
+
+function seedClientProjectDefaults(db) {
+  const now = new Date().toISOString();
+  const clients = [
+    ['unt', 'UNT', { priority: 'P1' }],
+    ['buddhas', "Buddha\'s Hawaiian Bakery", { priority: 'P1' }],
+    ['chromapages', 'Chromapages', { priority: 'P2' }],
+  ];
+  for (const [id, name, meta] of clients) {
+    db.prepare(`INSERT INTO clients (id, name, status, metadata_json, created_at, updated_at)
+      VALUES (?, ?, 'active', ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET name=excluded.name, updated_at=excluded.updated_at`).run(id, name, JSON.stringify(meta), now, now);
+  }
+}
+
+function migrateJsonBackupsToSqlite() {
+  try {
+    const db = getDb();
+    seedClientProjectDefaults(db);
+    if (fs.existsSync(HANDOFFS_FILE)) {
+      const handoffRows = JSON.parse(fs.readFileSync(HANDOFFS_FILE, 'utf8'));
+      const tx = db.transaction((rows) => rows.forEach(upsertHandoffRecord));
+      tx(handoffRows || []);
+    }
+    const tasksPath = path.join(__dirname, 'data', 'tasks.json');
+    if (fs.existsSync(tasksPath)) {
+      const taskData = JSON.parse(fs.readFileSync(tasksPath, 'utf8'));
+      const tx = db.transaction((rows) => rows.forEach(upsertTaskRecord));
+      tx(taskData.tasks || []);
+    }
+  } catch (e) {
+    console.error('⚠️ JSON→sqlite migration warning:', e.message);
+  }
+}
+
+migrateJsonBackupsToSqlite();
+
 function loadHandoffs() {
   ensureDataDir();
+  try {
+    const db = getDb();
+    seedClientProjectDefaults(db);
+    const rows = db.prepare('SELECT json FROM handoffs ORDER BY created_at ASC').all();
+    if (rows.length > 0) {
+      const data = rows.map(r => JSON.parse(r.json));
+      console.log(`📂 Loaded ${data.length} handoffs from sqlite`);
+      return new Map(data.map(h => [h.id, h]));
+    }
+  } catch (e) {
+    console.error('⚠️ Failed to load handoffs from sqlite:', e.message);
+  }
+
   if (fs.existsSync(HANDOFFS_FILE)) {
     try {
       const data = JSON.parse(fs.readFileSync(HANDOFFS_FILE, 'utf8'));
       console.log(`📂 Loaded ${data.length} handoffs from disk`);
+      try {
+        const db = getDb();
+        for (const h of data) upsertHandoffRecord(h);
+      } catch {}
       return new Map(data.map(h => [h.id, h]));
     } catch (e) {
       console.error('⚠️ Failed to load handoffs:', e.message);
@@ -126,6 +289,15 @@ function saveHandoffs() {
   try {
     const data = Array.from(handoffs.values());
     fs.writeFileSync(HANDOFFS_FILE, JSON.stringify(data, null, 2));
+    try {
+      const db = getDb();
+      const tx = db.transaction((rows) => {
+        for (const row of rows) upsertHandoffRecord(row);
+      });
+      tx(data);
+    } catch (dbErr) {
+      console.error('⚠️ Failed to save handoffs to sqlite:', dbErr.message);
+    }
   } catch (e) {
     console.error('⚠️ Failed to save handoffs:', e.message);
   }
@@ -1716,26 +1888,91 @@ app.get('/api/health/pipeline', (req, res) => {
 app.get('/api/clients', (req, res) => {
   const allHandoffs = Array.from(handoffs.values());
   const allTasks = loadTasks().tasks;
-  
-  // Extract unique clients from handoffs and tasks
-  const clientSet = new Set();
-  allHandoffs.forEach(h => {
-    if (h.client) clientSet.add(h.client);
-  });
-  allTasks.forEach(t => {
-    if (t.client) clientSet.add(t.client);
-  });
-  
-  const clients = Array.from(clientSet).sort().map(c => ({
-    id: c,
-    name: c.charAt(0).toUpperCase() + c.slice(1),
-    // Get stats for each client
-    handoffs: allHandoffs.filter(h => h.client === c).length,
-    tasks: allTasks.filter(t => t.client === c).length,
-    active: allHandoffs.filter(h => h.client === c && (h.status === 'in_progress' || h.status === 'pending')).length
+  let persistedClients = [];
+  try {
+    const db = getDb();
+    persistedClients = db.prepare('SELECT * FROM clients ORDER BY name ASC').all().map(r => ({
+      id: r.id,
+      name: r.name,
+      status: r.status,
+      metadata: JSON.parse(r.metadata_json || '{}')
+    }));
+  } catch {}
+
+  const clientMap = new Map();
+  for (const c of persistedClients) clientMap.set(c.id, c);
+  allHandoffs.forEach(h => { if (h.client && !clientMap.has(h.client)) clientMap.set(h.client, { id: h.client, name: h.client.charAt(0).toUpperCase() + h.client.slice(1) }); });
+  allTasks.forEach(t => { if (t.client && !clientMap.has(t.client)) clientMap.set(t.client, { id: t.client, name: t.client.charAt(0).toUpperCase() + t.client.slice(1) }); });
+
+  const clients = Array.from(clientMap.values()).sort((a,b)=>a.name.localeCompare(b.name)).map(c => ({
+    ...c,
+    handoffs: allHandoffs.filter(h => h.client === c.id).length,
+    tasks: allTasks.filter(t => t.client === c.id).length,
+    active: allHandoffs.filter(h => h.client === c.id && (h.status === 'in_progress' || h.status === 'pending')).length
   }));
   
   res.json({ clients });
+});
+
+app.get('/api/projects', (req, res) => {
+  const { clientId } = req.query;
+  try {
+    const db = getDb();
+    let rows = db.prepare('SELECT * FROM projects ORDER BY updated_at DESC, name ASC').all();
+    if (clientId) rows = rows.filter(r => r.client_id === clientId);
+    const projects = rows.map(r => ({
+      id: r.id,
+      clientId: r.client_id,
+      name: r.name,
+      status: r.status,
+      leadAgent: r.lead_agent,
+      outputPath: r.output_path,
+      metadata: JSON.parse(r.metadata_json || '{}'),
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    }));
+    res.json({ projects });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/projects', (req, res) => {
+  const { id, clientId, name, status = 'active', leadAgent = null, outputPath = null, metadata = {} } = req.body;
+  if (!clientId || !name) return res.status(400).json({ error: 'clientId and name required' });
+  const projectId = id || `project_${Date.now()}`;
+  const now = new Date().toISOString();
+  try {
+    const db = getDb();
+    db.prepare(`INSERT INTO projects (id, client_id, name, status, lead_agent, output_path, metadata_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET client_id=excluded.client_id, name=excluded.name, status=excluded.status, lead_agent=excluded.lead_agent, output_path=excluded.output_path, metadata_json=excluded.metadata_json, updated_at=excluded.updated_at`).run(
+        projectId, clientId, name, status, leadAgent, outputPath, JSON.stringify(metadata || {}), now, now
+      );
+    res.json({ success: true, project: { id: projectId, clientId, name, status, leadAgent, outputPath, metadata, createdAt: now, updatedAt: now } });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/persistence/status', (req, res) => {
+  try {
+    const db = getDb();
+    const handoffCount = db.prepare('SELECT COUNT(*) as count FROM handoffs').get().count;
+    const taskCount = db.prepare('SELECT COUNT(*) as count FROM tasks').get().count;
+    const clientCount = db.prepare('SELECT COUNT(*) as count FROM clients').get().count;
+    const projectCount = db.prepare('SELECT COUNT(*) as count FROM projects').get().count;
+    res.json({
+      mode: 'sqlite',
+      dbFile: SQLITE_DB_FILE,
+      handoffs: handoffCount,
+      tasks: taskCount,
+      clients: clientCount,
+      projects: projectCount,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ==================== END HEARTBEAT AWARENESS ====================
@@ -5088,19 +5325,59 @@ app.get('/api/marketing/activity', (req, res) => {
 // ==================== TASK BOARD API ====================
 const tasksFile = path.join(__dirname, 'data', 'tasks.json');
 
+function defaultTaskConfig() {
+  return { tasks: [], columns: [], priorities: [], owners: [] };
+}
+
 function loadTasks() {
   try {
+    const db = getDb();
+    seedClientProjectDefaults(db);
+    const rows = db.prepare('SELECT json FROM tasks ORDER BY created_at ASC').all();
+    if (rows.length > 0) {
+      const tasks = rows.map(r => JSON.parse(r.json));
+      let meta = defaultTaskConfig();
+      if (fs.existsSync(tasksFile)) {
+        try { meta = { ...meta, ...JSON.parse(fs.readFileSync(tasksFile, 'utf8')) }; } catch {}
+      }
+      meta.tasks = tasks;
+      return meta;
+    }
+  } catch (e) {
+    console.error('Error loading tasks from sqlite:', e);
+  }
+
+  try {
     if (fs.existsSync(tasksFile)) {
-      return JSON.parse(fs.readFileSync(tasksFile, 'utf8'));
+      const data = JSON.parse(fs.readFileSync(tasksFile, 'utf8'));
+      try {
+        const db = getDb();
+        const tx = db.transaction((rows) => {
+          for (const t of rows) upsertTaskRecord(t);
+        });
+        tx(data.tasks || []);
+      } catch (e) {
+        console.error('Error migrating tasks to sqlite:', e.message);
+      }
+      return data;
     }
   } catch (e) {
     console.error('Error loading tasks:', e);
   }
-  return { tasks: [], columns: [], priorities: [], owners: [] };
+  return defaultTaskConfig();
 }
 
 function saveTasks(data) {
   fs.writeFileSync(tasksFile, JSON.stringify(data, null, 2));
+  try {
+    const db = getDb();
+    const tx = db.transaction((rows) => {
+      for (const t of rows) upsertTaskRecord(t);
+    });
+    tx(data.tasks || []);
+  } catch (e) {
+    console.error('Error saving tasks to sqlite:', e.message);
+  }
 }
 
 app.get('/api/tasks', (req, res) => {
