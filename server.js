@@ -1590,6 +1590,11 @@ app.get('/ops', (req, res) => {
   if (fs.existsSync(f)) return res.sendFile(f);
   res.redirect('/dashboard');
 });
+app.get('/project', (req, res) => {
+  const f = path.join(__dirname, 'public', 'project.html');
+  if (fs.existsSync(f)) return res.sendFile(f);
+  res.redirect('/ops');
+});
 app.get('/pipelines', (req, res) => {
   const f = path.join(__dirname, 'public', 'pipelines.html');
   if (fs.existsSync(f)) return res.sendFile(f);
@@ -1990,6 +1995,32 @@ app.get('/api/projects', (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+app.get('/api/projects/:id/details', (req, res) => {
+  const project = getProjectById(req.params.id);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+
+  const projectHandoffs = Array.from(handoffs.values())
+    .filter(h => h.projectId === project.id)
+    .sort((a,b) => new Date(b.completedAt || b.responseAt || b.startedAt || b.createdAt) - new Date(a.completedAt || a.responseAt || a.startedAt || a.createdAt));
+  const projectTasks = (loadTasks().tasks || []).filter(t => t.projectId === project.id || t.client === project.clientId);
+  const approvals = projectTasks.filter(t => t.column === 'pending_review' || t.approvalStatus === 'needs_revision');
+  const artifacts = projectHandoffs.flatMap(h => (h.artifacts || []).map(a => ({ handoffId: h.id, path: a, task: h.task, agent: h.toAgent, finalOutcome: h.finalOutcome || null })));
+  const pipelines = [...new Set(projectHandoffs.map(h => h.pipelineId).filter(Boolean))].map(id => ({
+    id,
+    steps: projectHandoffs.filter(h => h.pipelineId === id).length,
+    status: projectHandoffs.some(h => h.pipelineId === id && h.status === 'failed') ? 'failed' : projectHandoffs.some(h => h.pipelineId === id && h.status !== 'completed') ? 'in_progress' : 'completed'
+  }));
+  const performance = {
+    totalRuns: projectHandoffs.length,
+    completed: projectHandoffs.filter(h => h.status === 'completed').length,
+    failed: projectHandoffs.filter(h => h.status === 'failed').length,
+    approvalsPending: approvals.length,
+    artifacts: artifacts.length,
+  };
+
+  res.json({ project, handoffs: projectHandoffs, tasks: projectTasks, approvals, artifacts, pipelines, performance });
 });
 
 app.post('/api/projects', (req, res) => {
@@ -5797,6 +5828,21 @@ app.post('/api/approvals/task/:id/revision', (req, res) => {
   task.approvalStatus = 'needs_revision';
   task.blockers = task.blockers || [];
   task.blockers.push({ id: 'rev_' + Date.now(), reason: reason || 'Needs revision', createdAt: new Date().toISOString() });
+  task.updatedAt = new Date().toISOString();
+  saveTasks(data);
+  res.json({ success: true, task });
+});
+
+app.post('/api/approvals/task/:id/deliver', (req, res) => {
+  const { id } = req.params;
+  const { note } = req.body || {};
+  const data = loadTasks();
+  const task = data.tasks.find(t => t.id === id);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+  task.column = 'done';
+  task.deliveryStatus = 'delivered';
+  task.deliveredAt = new Date().toISOString();
+  task.deliveryNote = note || null;
   task.updatedAt = new Date().toISOString();
   saveTasks(data);
   res.json({ success: true, task });

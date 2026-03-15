@@ -93,7 +93,7 @@ async function loadAll(){
   document.getElementById('sBlocked').textContent=ov.summary.blocked;
   document.getElementById('sDone').textContent=ov.summary.completedToday;
 
-  renderList('projects', ov.projects, p=>`<div class="row"><div class="main"><div>${rowPill('project', p.clientId)} <strong>${esc(p.name)}</strong></div><div class="small">Lead: ${esc(p.leadAgent||'unassigned')} • ${esc(p.status)} • ${esc(p.outputPath||'')}</div></div></div>`, 'No projects');
+  renderList('projects', ov.projects, p=>`<div class="row"><div class="main"><div>${rowPill('project', p.clientId)} <strong><a href="/project?id=${encodeURIComponent(p.id)}" style="color:var(--text);text-decoration:none">${esc(p.name)}</a></strong></div><div class="small">Lead: ${esc(p.leadAgent||'unassigned')} • ${esc(p.status)} • ${esc(p.outputPath||'')}</div></div></div>`, 'No projects');
   renderList('approvals', ov.approvals, a=>`<div class="row"><div class="main"><div>${rowPill('pending','pending_review')} <strong>${esc(a.title)}</strong></div><div class="small">${esc(a.client||'no-client')} • ${esc(a.owner||'unassigned')} • ${esc(a.priority||'medium')}</div></div></div>`, 'No approvals');
   const blockedItems = [...(blocked.tasks||[]).map(t=>({type:'task', title:t.title, meta:`${t.client||'no-client'} • ${(t.blockers||[]).length} blocker(s)`})), ...(blocked.handoffs||[]).map(h=>({type:'handoff', title:h.task, meta:`${h.client||'no-client'} • ${h.failureReason||h.error||h.status}`}))];
   renderList('blocked', blockedItems, b=>`<div class="row"><div class="main"><div>${rowPill('blocked', b.type)} <strong>${esc(b.title)}</strong></div><div class="small">${esc(b.meta)}</div></div></div>`, 'No blocked items');
