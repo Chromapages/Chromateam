@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AHM — Ops</title>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;700&family=Syne:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root{--bg:#080807;--s1:#0F0F0D;--s2:#171714;--rule:#2C2C28;--text:#EDE9DC;--muted:#7A7770;--blue:#1D6FA4;--amber:#D4860A;--green:#16A34A;--red:#E11934;--purple:#7C3AED}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:Syne,sans-serif}
+    .header{display:flex;gap:12px;align-items:center;padding:16px 20px;border-bottom:1px solid var(--rule);background:var(--s1);position:sticky;top:0;z-index:5}
+    h1{margin:0;font:18px 'Bebas Neue',sans-serif;letter-spacing:.1em}.spacer{flex:1}
+    select,button,input{background:var(--s2);border:1px solid var(--rule);color:var(--text);padding:8px 10px;border-radius:4px}
+    .wrap{padding:20px;display:grid;grid-template-columns:1.1fr .9fr;gap:16px}.full{grid-column:1/-1}
+    .panel{background:var(--s1);border:1px solid var(--rule);border-radius:8px;padding:16px}
+    .title{font:13px 'Bebas Neue',sans-serif;letter-spacing:.12em;color:var(--muted);margin-bottom:12px}
+    .stats{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}.stat{background:var(--s2);border:1px solid var(--rule);padding:12px;border-radius:6px}.stat .v{font:28px 'Bebas Neue',sans-serif}.stat .l{font:10px 'IBM Plex Mono',monospace;color:var(--muted);text-transform:uppercase}
+    .list{display:flex;flex-direction:column;gap:8px}.row{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;background:var(--s2);border:1px solid var(--rule);border-radius:6px}.row .main{flex:1}.small{font:10px 'IBM Plex Mono',monospace;color:var(--muted)}
+    .pill{font:10px 'IBM Plex Mono',monospace;padding:3px 7px;border-radius:999px;border:1px solid var(--rule)} .pending{color:var(--amber);border-color:var(--amber)} .blocked{color:var(--red);border-color:var(--red)} .active{color:var(--blue);border-color:var(--blue)} .done{color:var(--green);border-color:var(--green)} .project{color:var(--purple);border-color:var(--purple)}
+    .controls{display:flex;gap:8px;flex-wrap:wrap}.empty{color:var(--muted);padding:12px 0}
+    @media (max-width:900px){.wrap{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}}
+  </style>
+</head>
+<body>
+  <div class="header">
+    <button onclick="location.href='/dashboard'">←</button>
+    <h1>MISSION CONTROL // OPS</h1>
+    <div class="spacer"></div>
+    <select id="clientFilter" onchange="loadAll()">
+      <option value="">All clients</option>
+      <option value="unt">UNT</option>
+      <option value="buddhas">Buddha's</option>
+      <option value="chromapages">Chromapages</option>
+    </select>
+    <button onclick="createProject()">+ Project</button>
+  </div>
+
+  <div class="wrap">
+    <div class="panel full">
+      <div class="title">OVERVIEW</div>
+      <div class="stats">
+        <div class="stat"><div class="v" id="sClients">0</div><div class="l">Clients</div></div>
+        <div class="stat"><div class="v" id="sProjects">0</div><div class="l">Projects</div></div>
+        <div class="stat"><div class="v" id="sActive">0</div><div class="l">Active Runs</div></div>
+        <div class="stat"><div class="v" id="sApprovals">0</div><div class="l">Approvals</div></div>
+        <div class="stat"><div class="v" id="sBlocked">0</div><div class="l">Blocked</div></div>
+        <div class="stat"><div class="v" id="sDone">0</div><div class="l">Done Today</div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="title">PROJECTS</div>
+      <div id="projects" class="list"></div>
+    </div>
+
+    <div class="panel">
+      <div class="title">APPROVAL INBOX</div>
+      <div id="approvals" class="list"></div>
+    </div>
+
+    <div class="panel">
+      <div class="title">BLOCKED ITEMS</div>
+      <div id="blocked" class="list"></div>
+    </div>
+
+    <div class="panel">
+      <div class="title">ACTIVE RUNS</div>
+      <div id="activeRuns" class="list"></div>
+    </div>
+
+    <div class="panel full">
+      <div class="title">RUN TIMELINE</div>
+      <div id="timeline" class="list"></div>
+    </div>
+  </div>
+
+<script>
+function q(){const c=document.getElementById('clientFilter').value;return c?`?client=${c}`:''}
+function esc(s=''){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]))}
+async function j(url,opts){const r=await fetch(url,opts);return r.json()}
+function rowPill(cls,text){return `<span class="pill ${cls}">${esc(text)}</span>`}
+function renderList(id, items, render, empty='Nothing here'){document.getElementById(id).innerHTML = items.length?items.map(render).join(''):`<div class="empty">${empty}</div>`}
+async function loadAll(){
+  const [ov, blocked, timeline] = await Promise.all([
+    j(`/api/ops/overview${q()}`),
+    j(`/api/ops/blocked${q()}`),
+    j(`/api/ops/timeline${q()}`)
+  ]);
+  document.getElementById('sClients').textContent=ov.summary.clients;
+  document.getElementById('sProjects').textContent=ov.summary.projects;
+  document.getElementById('sActive').textContent=ov.summary.activeRuns;
+  document.getElementById('sApprovals').textContent=ov.summary.approvals;
+  document.getElementById('sBlocked').textContent=ov.summary.blocked;
+  document.getElementById('sDone').textContent=ov.summary.completedToday;
+
+  renderList('projects', ov.projects, p=>`<div class="row"><div class="main"><div>${rowPill('project', p.clientId)} <strong>${esc(p.name)}</strong></div><div class="small">Lead: ${esc(p.leadAgent||'unassigned')} • ${esc(p.status)} • ${esc(p.outputPath||'')}</div></div></div>`, 'No projects');
+  renderList('approvals', ov.approvals, a=>`<div class="row"><div class="main"><div>${rowPill('pending','pending_review')} <strong>${esc(a.title)}</strong></div><div class="small">${esc(a.client||'no-client')} • ${esc(a.owner||'unassigned')} • ${esc(a.priority||'medium')}</div></div></div>`, 'No approvals');
+  const blockedItems = [...(blocked.tasks||[]).map(t=>({type:'task', title:t.title, meta:`${t.client||'no-client'} • ${(t.blockers||[]).length} blocker(s)`})), ...(blocked.handoffs||[]).map(h=>({type:'handoff', title:h.task, meta:`${h.client||'no-client'} • ${h.failureReason||h.error||h.status}`}))];
+  renderList('blocked', blockedItems, b=>`<div class="row"><div class="main"><div>${rowPill('blocked', b.type)} <strong>${esc(b.title)}</strong></div><div class="small">${esc(b.meta)}</div></div></div>`, 'No blocked items');
+  renderList('activeRuns', ov.activeRuns, r=>`<div class="row"><div class="main"><div>${rowPill('active', r.status)} <strong>${esc(r.task)}</strong></div><div class="small">${esc(r.client||'no-client')} • ${esc(r.toAgent)} • ${new Date(r.startedAt||r.createdAt).toLocaleString()}</div></div></div>`, 'No active runs');
+  renderList('timeline', timeline.events.slice(0,25), e=>`<div class="row"><div class="main"><div>${rowPill(e.status==='completed'?'done':e.status==='failed'?'blocked':'active', e.status)} <strong>${esc(e.title)}</strong></div><div class="small">${esc(e.client||'no-client')} • ${esc(e.agent||'')} • ${esc(e.outcome||'')} • ${new Date(e.at).toLocaleString()}</div></div></div>`, 'No timeline events');
+}
+async function createProject(){
+  const clientId = document.getElementById('clientFilter').value || prompt('clientId (unt/buddhas/chromapages)');
+  if(!clientId) return;
+  const name = prompt('Project name'); if(!name) return;
+  const leadAgent = prompt('Lead agent', 'bender') || 'bender';
+  const res = await j('/api/projects', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({clientId,name,leadAgent,status:'active',metadata:{createdFrom:'ops-ui'}})});
+  if(res.success) loadAll(); else alert(res.error||'Failed');
+}
+loadAll(); setInterval(loadAll, 30000);
+</script>
+</body>
+</html>

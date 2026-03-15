@@ -1535,6 +1535,11 @@ app.get('/client', (req, res) => {
   if (fs.existsSync(f)) return res.sendFile(f);
   res.redirect('/dashboard');
 });
+app.get('/ops', (req, res) => {
+  const f = path.join(__dirname, 'public', 'ops.html');
+  if (fs.existsSync(f)) return res.sendFile(f);
+  res.redirect('/dashboard');
+});
 app.get('/pipelines', (req, res) => {
   const f = path.join(__dirname, 'public', 'pipelines.html');
   if (fs.existsSync(f)) return res.sendFile(f);
@@ -1973,6 +1978,88 @@ app.get('/api/persistence/status', (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+app.get('/api/ops/overview', (req, res) => {
+  const { client } = req.query;
+  const allHandoffs = Array.from(handoffs.values()).filter(h => !client || h.client === client);
+  const taskData = loadTasks();
+  const tasks = (taskData.tasks || []).filter(t => !client || t.client === client);
+  let projects = [];
+  try {
+    const db = getDb();
+    let rows = db.prepare('SELECT * FROM projects ORDER BY updated_at DESC, name ASC').all();
+    if (client) rows = rows.filter(r => r.client_id === client);
+    projects = rows.map(r => ({
+      id: r.id,
+      clientId: r.client_id,
+      name: r.name,
+      status: r.status,
+      leadAgent: r.lead_agent,
+      outputPath: r.output_path,
+      metadata: JSON.parse(r.metadata_json || '{}'),
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    }));
+  } catch {}
+
+  const approvals = tasks.filter(t => t.column === 'pending_review');
+  const blocked = tasks.filter(t => t.column === 'blocked' || (t.blockers && t.blockers.length));
+  const activeRuns = allHandoffs.filter(h => h.status === 'in_progress' || h.status === 'pending');
+  const timeline = [...allHandoffs]
+    .sort((a,b) => new Date(b.completedAt || b.responseAt || b.startedAt || b.createdAt) - new Date(a.completedAt || a.responseAt || a.startedAt || a.createdAt))
+    .slice(0, 20)
+    .map(h => ({
+      id: h.id,
+      client: h.client,
+      task: h.task,
+      toAgent: h.toAgent,
+      status: h.status,
+      finalOutcome: h.finalOutcome || null,
+      verification: h.verification || null,
+      timestamp: h.completedAt || h.responseAt || h.startedAt || h.createdAt,
+    }));
+
+  res.json({
+    summary: {
+      clients: new Set(allHandoffs.map(h => h.client).filter(Boolean)).size,
+      projects: projects.length,
+      activeRuns: activeRuns.length,
+      approvals: approvals.length,
+      blocked: blocked.length,
+      completedToday: allHandoffs.filter(h => h.status === 'completed' && h.completedAt && h.completedAt.startsWith(new Date().toISOString().slice(0,10))).length,
+    },
+    projects,
+    approvals,
+    blocked,
+    activeRuns,
+    timeline,
+  });
+});
+
+app.get('/api/ops/blocked', (req, res) => {
+  const { client } = req.query;
+  const tasks = (loadTasks().tasks || []).filter(t => (!client || t.client === client) && (t.column === 'blocked' || (t.blockers && t.blockers.length)));
+  const handoffBlocked = Array.from(handoffs.values()).filter(h => (!client || h.client === client) && (h.status === 'failed' || h.failureReason));
+  res.json({ tasks, handoffs: handoffBlocked });
+});
+
+app.get('/api/ops/timeline', (req, res) => {
+  const { client } = req.query;
+  const events = Array.from(handoffs.values())
+    .filter(h => !client || h.client === client)
+    .map(h => ({
+      id: h.id,
+      client: h.client,
+      type: 'handoff',
+      title: h.task,
+      agent: h.toAgent,
+      status: h.status,
+      outcome: h.finalOutcome || null,
+      at: h.completedAt || h.responseAt || h.startedAt || h.createdAt,
+    }))
+    .sort((a,b) => new Date(b.at) - new Date(a.at));
+  res.json({ events });
 });
 
 // ==================== END HEARTBEAT AWARENESS ====================
