@@ -155,6 +155,7 @@ function getDb() {
         status TEXT DEFAULT 'active',
         lead_agent TEXT,
         output_path TEXT,
+        github_repo TEXT,
         metadata_json TEXT DEFAULT '{}',
         created_at TEXT,
         updated_at TEXT,
@@ -2083,20 +2084,143 @@ app.get('/api/projects/:id/details', (req, res) => {
 });
 
 app.post('/api/projects', (req, res) => {
-  const { id, clientId, name, status = 'active', leadAgent = null, outputPath = null, metadata = {} } = req.body;
+  const { id, clientId, name, status = 'active', leadAgent = null, outputPath = null, githubRepo = null, metadata = {} } = req.body;
   if (!clientId || !name) return res.status(400).json({ error: 'clientId and name required' });
   const projectId = id || `project_${Date.now()}`;
   const now = new Date().toISOString();
   try {
     const db = getDb();
-    db.prepare(`INSERT INTO projects (id, client_id, name, status, lead_agent, output_path, metadata_json, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET client_id=excluded.client_id, name=excluded.name, status=excluded.status, lead_agent=excluded.lead_agent, output_path=excluded.output_path, metadata_json=excluded.metadata_json, updated_at=excluded.updated_at`).run(
-        projectId, clientId, name, status, leadAgent, outputPath, JSON.stringify(metadata || {}), now, now
+    db.prepare(`INSERT INTO projects (id, client_id, name, status, lead_agent, output_path, github_repo, metadata_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET client_id=excluded.client_id, name=excluded.name, status=excluded.status, lead_agent=excluded.lead_agent, output_path=excluded.output_path, github_repo=excluded.github_repo, metadata_json=excluded.metadata_json, updated_at=excluded.updated_at`).run(
+        projectId, clientId, name, status, leadAgent, outputPath, githubRepo, JSON.stringify(metadata || {}), now, now
       );
-    logAuditEvent({ eventType: 'project_created', entityType: 'project', entityId: projectId, clientId, projectId, actor: 'chroma', details: { name, status, leadAgent, outputPath, metadata } });
-    res.json({ success: true, project: { id: projectId, clientId, name, status, leadAgent, outputPath, metadata, createdAt: now, updatedAt: now } });
+    logAuditEvent({ eventType: 'project_created', entityType: 'project', entityId: projectId, clientId, projectId, actor: 'chroma', details: { name, status, leadAgent, outputPath, githubRepo, metadata } });
+    res.json({ success: true, project: { id: projectId, clientId, name, status, leadAgent, outputPath, githubRepo, metadata, createdAt: now, updatedAt: now } });
   } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ==================== GITHUB INTEGRATION ====================
+
+// Update project GitHub repo
+app.patch('/api/projects/:id', (req, res) => {
+  const { id } = req.params;
+  const { githubRepo, name, status, leadAgent, outputPath, metadata } = req.body;
+  const now = new Date().toISOString();
+  try {
+    const db = getDb();
+    const existing = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ error: 'Project not found' });
+    
+    const newGithubRepo = githubRepo !== undefined ? githubRepo : existing.github_repo;
+    const newName = name !== undefined ? name : existing.name;
+    const newStatus = status !== undefined ? status : existing.status;
+    const newLeadAgent = leadAgent !== undefined ? leadAgent : existing.lead_agent;
+    const newOutputPath = outputPath !== undefined ? outputPath : existing.output_path;
+    const newMetadata = metadata !== undefined ? JSON.stringify(metadata) : existing.metadata_json;
+    
+    db.prepare(`UPDATE projects SET name=?, status=?, lead_agent=?, output_path=?, github_repo=?, metadata_json=?, updated_at=? WHERE id=?`).run(
+      newName, newStatus, newLeadAgent, newOutputPath, newGithubRepo, newMetadata, now, id
+    );
+    
+    logAuditEvent({ eventType: 'project_updated', entityType: 'project', entityId: id, actor: 'chroma', details: { githubRepo: newGithubRepo, name: newName } });
+    res.json({ success: true, project: getProjectById(id) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Commit and push to GitHub (requires human approval - always)
+app.post('/api/github/commit', async (req, res) => {
+  const { projectId, branchName, commitMessage, files } = req.body;
+  
+  if (!projectId || !branchName || !commitMessage || !files || !files.length) {
+    return res.status(400).json({ error: 'projectId, branchName, commitMessage, and files array required' });
+  }
+  
+  const project = getProjectById(projectId);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  if (!project.githubRepo) return res.status(400).json({ error: 'No githubRepo configured for this project' });
+  
+  try {
+    const db = getDb();
+    const fs = require('fs');
+    const { execSync } = require('child_process');
+    const tempDir = `/tmp/ahm-github-${Date.now()}`;
+    
+    // Clone the repo
+    console.log(`[GitHub] Cloning ${project.githubRepo}...`);
+    execSync(`git clone https://github.com/${project.githubRepo}.git ${tempDir}`, { stdio: 'pipe' });
+    
+    // Create and switch to branch
+    try {
+      execSync(`cd ${tempDir} && git checkout -b ${branchName}`, { stdio: 'pipe' });
+    } catch {
+      // Branch might exist, try to switch
+      execSync(`cd ${tempDir} && git checkout ${branchName}`, { stdio: 'pipe' });
+    }
+    
+    // Process files - get content from deliverables
+    const processedFiles = [];
+    for (const file of files) {
+      let sourcePath = file.path;
+      let destPath = file.path;
+      
+      // If deliverableId provided, look up the actual output path
+      if (file.deliverableId) {
+        const deliverable = db.prepare('SELECT * FROM deliverables WHERE id = ?').get(file.deliverableId);
+        if (deliverable && deliverable.output_path) {
+          sourcePath = deliverable.output_path;
+        }
+      }
+      
+      // Resolve to absolute path if relative
+      if (!sourcePath.startsWith('/')) {
+        sourcePath = `${project.outputPath || tempDir}/${sourcePath}`;
+      }
+      
+      destPath = `${tempDir}/${destPath}`;
+      const destDir = destPath.substring(0, destPath.lastIndexOf('/'));
+      
+      if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+      
+      if (fs.existsSync(sourcePath)) {
+        fs.copyFileSync(sourcePath, destPath);
+        processedFiles.push(destPath);
+        console.log(`[GitHub] Copied: ${sourcePath} -> ${destPath}`);
+      } else {
+        console.log(`[GitHub] Warning: File not found: ${sourcePath}`);
+      }
+    }
+    
+    // Commit
+    execSync(`cd ${tempDir} && git add -A && git commit -m "${commitMessage.replace(/"/g, '\\"')}"`, { stdio: 'pipe' });
+    
+    // Push
+    console.log(`[GitHub] Pushing to ${branchName}...`);
+    execSync(`cd ${tempDir} && git push -u origin ${branchName}`, { stdio: 'pipe' });
+    
+    // Cleanup
+    execSync(`rm -rf ${tempDir}`);
+    
+    // Get the commit URL
+    const commitUrl = `https://github.com/${project.githubRepo}/blob/${branchName}`;
+    const prUrl = `https://github.com/${project.githubRepo}/compare/main...${branchName}?expand=1`;
+    
+    logAuditEvent({ eventType: 'github_commit', entityType: 'project', entityId: projectId, actor: 'chroma', details: { branch: branchName, commitMessage, files: files.length, repo: project.githubRepo } });
+    
+    res.json({ 
+      success: true, 
+      commitUrl, 
+      prUrl,
+      branch: branchName,
+      message: commitMessage,
+      filesCommitted: files.length
+    });
+  } catch (e) {
+    console.error('[GitHub] Commit failed:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -2328,6 +2452,7 @@ function getProjectById(projectId) {
       status: row.status,
       leadAgent: row.lead_agent,
       outputPath: row.output_path,
+      githubRepo: row.github_repo,
       metadata: JSON.parse(row.metadata_json || '{}'),
       createdAt: row.created_at,
       updatedAt: row.updated_at,

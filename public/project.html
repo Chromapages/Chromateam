@@ -1,1 +1,617 @@
-<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>AHM — Project</title><link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;700&family=Syne:wght@400;500;600;700&display=swap" rel="stylesheet"><style>:root{--bg:#080807;--s1:#0F0F0D;--s2:#171714;--rule:#2C2C28;--text:#EDE9DC;--muted:#7A7770;--blue:#1D6FA4;--amber:#D4860A;--green:#16A34A;--red:#E11934;--purple:#7C3AED}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Syne,sans-serif}.header{display:flex;gap:12px;align-items:center;padding:16px 20px;border-bottom:1px solid var(--rule);background:var(--s1);position:sticky;top:0}.header h1{margin:0;font:18px 'Bebas Neue',sans-serif;letter-spacing:.1em}.spacer{flex:1}.wrap{padding:20px;display:grid;grid-template-columns:1fr 1fr;gap:16px}.full{grid-column:1/-1}.panel{background:var(--s1);border:1px solid var(--rule);border-radius:8px;padding:16px}.title{font:13px 'Bebas Neue',sans-serif;letter-spacing:.12em;color:var(--muted);margin-bottom:12px}.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.stat{background:var(--s2);border:1px solid var(--rule);padding:12px;border-radius:6px}.v{font:26px 'Bebas Neue',sans-serif}.l{font:10px 'IBM Plex Mono',monospace;color:var(--muted);text-transform:uppercase}.list{display:flex;flex-direction:column;gap:8px}.row{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;background:var(--s2);border:1px solid var(--rule);border-radius:6px}.main{flex:1}.small{font:10px 'IBM Plex Mono',monospace;color:var(--muted)}.pill{font:10px 'IBM Plex Mono',monospace;padding:3px 7px;border-radius:999px;border:1px solid var(--rule)}.btn{background:var(--s2);border:1px solid var(--rule);color:var(--text);padding:8px 10px;border-radius:4px;cursor:pointer}.field,select,textarea{width:100%;background:var(--s2);border:1px solid var(--rule);color:var(--text);padding:10px;border-radius:6px}.controls{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px}.artifact a{color:#9dd1ff}.done{color:var(--green);border-color:var(--green)}.active{color:var(--blue);border-color:var(--blue)}.blocked{color:var(--red);border-color:var(--red)}.pending{color:var(--amber);border-color:var(--amber)}@media(max-width:900px){.wrap{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}.controls{grid-template-columns:1fr}}</style></head><body><div class='header'><button class='btn' onclick="location.href='/ops'">←</button><h1 id='heading'>PROJECT //</h1><div class='spacer'></div><button class='btn' onclick="location.href='/reports'">Reports</button><button class='btn' onclick='launchPipeline()'>Launch Pipeline</button></div><div class='wrap'><div class='panel full'><div class='title'>PROJECT OVERVIEW</div><div class='stats'><div class='stat'><div class='v' id='sRuns'>0</div><div class='l'>Runs</div></div><div class='stat'><div class='v' id='sCompleted'>0</div><div class='l'>Completed</div></div><div class='stat'><div class='v' id='sFailed'>0</div><div class='l'>Failed</div></div><div class='stat'><div class='v' id='sApprovals'>0</div><div class='l'>Approvals</div></div><div class='stat'><div class='v' id='sArtifacts'>0</div><div class='l'>Artifacts</div></div></div></div><div class='panel full'><div class='title'>PIPELINE LAUNCHER</div><div class='controls'><select id='template'></select><input id='task' class='field' placeholder='What do you want delivered?'><input id='context' class='field' placeholder='Context / constraints'><button class='btn' onclick='launchPipeline()'>Run</button></div></div><div class='panel'><div class='title'>APPROVALS</div><div id='approvals' class='list'></div></div><div class='panel'><div class='title'>PIPELINES</div><div id='pipelines' class='list'></div></div><div class='panel full'><div class='title'>ARTIFACTS</div><div id='artifacts' class='list'></div></div><div class='panel full'><div class='title'>RUN HISTORY</div><div id='handoffs' class='list'></div></div></div><script>const qp=new URLSearchParams(location.search);const projectId=qp.get('id');if(!projectId){document.body.innerHTML='<div style="padding:24px;color:white">Missing project id</div>'}function esc(s=''){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]))}function pill(c,t){return `<span class="pill ${c}">${esc(t)}</span>`}async function j(u,o){const r=await fetch(u,o);return r.json()}async function loadTemplates(){const d=await j('/api/service-templates');document.getElementById('template').innerHTML=d.templates.map(t=>`<option value="${t.key}">${t.name}</option>`).join('')}function list(id,items,render,empty='Nothing here'){document.getElementById(id).innerHTML=items.length?items.map(render).join(''):`<div class='small'>${empty}</div>`}async function load(){const d=await j(`/api/projects/${projectId}/details`);document.getElementById('heading').textContent=`PROJECT // ${d.project.name}`;document.getElementById('sRuns').textContent=d.performance.totalRuns;document.getElementById('sCompleted').textContent=d.performance.completed;document.getElementById('sFailed').textContent=d.performance.failed;document.getElementById('sApprovals').textContent=d.performance.approvalsPending;document.getElementById('sArtifacts').textContent=d.performance.artifacts;list('approvals',d.approvals,a=>`<div class='row'><div class='main'><div>${pill('pending',a.approvalStatus||a.column)} <strong>${esc(a.title)}</strong></div><div class='small'>${esc(a.description||'')}</div></div><button class='btn' onclick="deliver('${a.id}')">Deliver</button></div>`,'No approvals');list('pipelines',d.pipelines,p=>`<div class='row'><div class='main'><div>${pill(p.status==='completed'?'done':p.status==='failed'?'blocked':'active',p.status)} <strong>${esc(p.id)}</strong></div><div class='small'>${p.steps} steps</div></div><button class='btn' onclick="cancelPipeline('${p.id}')">Cancel</button></div>`,'No pipelines');list('artifacts',d.artifacts,a=>`<div class='row artifact'><div class='main'><div>${pill(a.finalOutcome==='artifact_verified'?'done':'pending',a.agent)} <strong>${esc(a.task||'artifact')}</strong></div><div class='small'><a href='file://${a.path}' target='_blank'>${esc(a.path)}</a></div></div></div>`,'No artifacts yet');list('handoffs',d.handoffs.slice(0,25),h=>`<div class='row'><div class='main'><div>${pill(h.status==='completed'?'done':h.status==='failed'?'blocked':'active',h.status)} <strong>${esc(h.task)}</strong></div><div class='small'>${esc(h.toAgent)} • ${esc(h.finalOutcome||'')} • ${new Date(h.completedAt||h.responseAt||h.startedAt||h.createdAt).toLocaleString()}</div></div>${h.status==='failed'?`<button class='btn' onclick="retryHandoff('${h.id}')">Retry</button>`:''}${['pending','in_progress'].includes(h.status)?`<button class='btn' onclick="cancelHandoff('${h.id}')">Cancel</button>`:''}${h.artifacts&&h.artifacts.length?`<button class='btn' onclick="inspectArtifacts('${h.id}')">Artifacts</button>`:''}</div>`,'No runs yet')}async function launchPipeline(){const template=document.getElementById('template').value;const task=document.getElementById('task').value.trim();const context=document.getElementById('context').value.trim();if(!template||!task)return;const d=await j(`/api/projects/${projectId}/details`);const res=await j(`/api/service-template/${template}/launch`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,context,projectId,client:d.project.clientId,runAsync:true})});if(res.success){document.getElementById('task').value='';load()}else alert(res.error||'Failed')}async function deliver(id){const note=prompt('Delivery note (optional):')||'';const res=await j(`/api/approvals/task/${id}/deliver`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({note})});if(res.success)load();else alert(res.error||'Failed')}async function retryHandoff(id){const res=await j(`/api/handoff/${id}/retry`,{method:'POST'});if(res.success)load();else alert(res.error||'Failed')}async function cancelHandoff(id){if(!confirm('Cancel this handoff?'))return;const res=await j(`/api/handoff/${id}/cancel`,{method:'POST'});if(res.success)load();else alert(res.error||'Failed')}async function cancelPipeline(id){if(!confirm('Cancel this pipeline?'))return;const res=await j(`/api/pipeline/${id}/cancel`,{method:'POST'});if(res.success)load();else alert(res.error||'Failed')}async function inspectArtifacts(id){const d=await j(`/api/handoff/${id}/deliverables`);if(!d.files||!d.files.length){alert('No artifacts found');return}const first=d.files[0];const p=await j(`/api/handoff/${id}/artifact-preview?path=${encodeURIComponent(first.path)}`);alert(`${first.path}\n\n${p.content||''}`)}loadTemplates().then(load)</script></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>AHM — Project</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#09090B">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/global-nav.css?v=2026.03.15.1">
+  <link rel="stylesheet" href="css/ahm-design.css?v=2026.03.15.1">
+  <style>
+    /* Artifact preview dialog */
+    #previewDialog {
+      position: fixed; inset: 0; z-index: 400;
+      background: rgba(0,0,0,0.8);
+      display: none; align-items: flex-end; justify-content: center;
+    }
+    #previewDialog.open { display: flex; }
+    @media (min-width:600px) { #previewDialog { align-items:center; } }
+    #previewBox {
+      background: var(--surface-1); border: 1px solid var(--rule);
+      border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+      width: 100%; max-height: 85vh; overflow: auto;
+    }
+    @media (min-width:600px) {
+      #previewBox { border-radius: var(--radius-lg); max-width: 700px; max-height: 75vh; }
+    }
+    #previewContent {
+      font-family: var(--font-mono); font-size: 11px; line-height: 1.6;
+      color: var(--text-secondary); padding: 16px;
+      white-space: pre-wrap; word-break: break-all;
+    }
+    .launcher-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    @media (max-width:600px) { .launcher-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body class="ahm-page">
+
+  <div class="ahm-accent-bar"></div>
+
+  <header class="ahm-header">
+    <button id="ahm-nav-toggle" class="btn-icon" aria-label="Toggle navigation">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <span class="ahm-header-logo">AHM<span class="logo-dot">·</span></span>
+    <div class="ahm-header-sep"></div>
+    <span class="ahm-header-title" id="heading">Project</span>
+    <div class="ahm-header-spacer"></div>
+    <div class="ahm-header-actions">
+      <span id="healthBadge" style="display:none;" class="pill pill-muted">—</span>
+      <div class="conn-badge">
+        <div class="conn-dot live" id="connDot"></div>
+        <span id="connLabel">LIVE</span>
+      </div>
+      <a id="clientReportLink" href="#" class="btn btn-ghost btn-sm" style="display:none;">Client Report</a>
+      <a href="ops.html" class="btn btn-ghost btn-sm">← Ops</a>
+    </div>
+  </header>
+
+  <div class="page-wrap">
+
+    <!-- No project state -->
+    <div id="noProjectView" style="display:none;">
+      <div class="empty-state" style="padding:80px 20px;">
+        <div class="empty-state-dash">⊡</div>
+        <div class="empty-state-text">No project ID in URL. Use ?id=project_id</div>
+      </div>
+    </div>
+
+    <!-- Project View -->
+    <div id="projectView">
+
+      <!-- Metrics -->
+      <div class="metrics-row mb-5">
+        <div class="metric-card mc-blue">
+          <div class="metric-label">Total Runs</div>
+          <div class="metric-value mv-blue" id="sRuns">—</div>
+        </div>
+        <div class="metric-card mc-green">
+          <div class="metric-label">Completed</div>
+          <div class="metric-value mv-green" id="sCompleted">—</div>
+        </div>
+        <div class="metric-card mc-red">
+          <div class="metric-label">Failed</div>
+          <div class="metric-value mv-red" id="sFailed">—</div>
+        </div>
+        <div class="metric-card mc-purple">
+          <div class="metric-label">Approvals</div>
+          <div class="metric-value mv-purple" id="sApprovals">—</div>
+        </div>
+        <div class="metric-card mc-amber">
+          <div class="metric-label">Artifacts</div>
+          <div class="metric-value mv-amber" id="sArtifacts">—</div>
+        </div>
+      </div>
+
+      <!-- GitHub Integration Panel -->
+      <div class="panel mb-5" id="githubPanel" style="display:none;">
+        <div class="panel-header">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-primary)" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+          <span class="label" style="color:var(--text-secondary);">GitHub</span>
+          <span class="pill pill-done" id="githubRepoBadge" style="margin-left:auto;">Connected</span>
+        </div>
+        <div class="panel-body">
+          <div id="githubConfigSection">
+            <div class="field-group mb-3">
+              <label class="field-label">GitHub Repository</label>
+              <div style="display:flex;gap:.5rem;">
+                <input id="githubRepoInput" class="field flex-1" placeholder="e.g., Chromapages/unionnational">
+                <button class="btn btn-primary" onclick="saveGitHubRepo()">Save</button>
+              </div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:.25rem;">Format: owner/repo (e.g., Chromapages/unionnational)</div>
+            </div>
+          </div>
+          <div id="githubCommitSection" style="display:none;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem;">
+              <span style="font-family:var(--font-mono);font-size:12px;" id="githubRepoDisplay">—</span>
+              <button class="btn btn-sm" onclick="showCommitToGitHub()">🚀 Commit to GitHub</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pipeline Launcher Panel -->
+      <div class="panel mb-5">
+        <div class="panel-header">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          <span class="label" style="color:var(--text-secondary);">Launch Pipeline</span>
+        </div>
+        <div class="panel-body">
+          <div class="launcher-grid mb-3">
+            <div class="field-group" style="margin-bottom:0;">
+              <label class="field-label">Template</label>
+              <select id="template" class="field"></select>
+            </div>
+            <div class="field-group" style="margin-bottom:0;">
+              <label class="field-label">Task</label>
+              <input id="task" class="field" placeholder="What do you want delivered?">
+            </div>
+          </div>
+          <div class="flex gap-2 items-center">
+            <input id="context" class="field flex-1" placeholder="Context / constraints (optional)">
+            <button class="btn btn-primary" onclick="launchPipeline()">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Run
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main grid -->
+      <div class="grid-2">
+
+        <!-- LEFT: Approvals + Pipelines -->
+        <div>
+
+          <div class="mb-5">
+            <div class="section-hd">
+              <span class="section-hd-label">Pending Approvals</span>
+              <div class="section-hd-rule"></div>
+              <a href="approvals.html" class="section-hd-action">View all →</a>
+            </div>
+            <div class="data-list" id="approvals">
+              <div class="empty-state"><div class="empty-state-dash">✓</div><div class="empty-state-text">No approvals</div></div>
+            </div>
+          </div>
+
+          <div>
+            <div class="section-hd">
+              <span class="section-hd-label">Pipelines</span>
+              <div class="section-hd-rule"></div>
+              <button class="section-hd-action" onclick="load()">↻ Refresh</button>
+            </div>
+            <div class="data-list" id="pipelines">
+              <div class="empty-state"><div class="empty-state-dash">—</div><div class="empty-state-text">No pipelines</div></div>
+            </div>
+          </div>
+
+        </div><!-- /left -->
+
+        <!-- RIGHT: Artifacts -->
+        <div>
+          <div class="section-hd">
+            <span class="section-hd-label">Artifacts</span>
+            <div class="section-hd-rule"></div>
+            <span class="section-hd-count" id="artifactCountBadge">0</span>
+          </div>
+          <div class="artifact-list" id="artifacts">
+            <div class="empty-state"><div class="empty-state-dash">—</div><div class="empty-state-text">No artifacts yet</div></div>
+          </div>
+        </div>
+
+      </div><!-- /grid-2 -->
+
+      <!-- Run Summaries — full width -->
+      <div class="mt-5 grid-full" id="summariesSection" style="display:none;">
+        <div class="section-hd">
+          <span class="section-hd-label">Run Summaries</span>
+          <div class="section-hd-rule"></div>
+          <span class="section-hd-count" id="summaryCount">0</span>
+        </div>
+        <div class="data-list" id="runSummaries"></div>
+      </div>
+
+      <!-- Run History — full width -->
+      <div class="mt-5 grid-full">
+        <div class="section-hd">
+          <span class="section-hd-label">Run History</span>
+          <div class="section-hd-rule"></div>
+        </div>
+        <div class="data-list" id="handoffs">
+          <div class="empty-state"><div class="empty-state-dash">—</div><div class="empty-state-text">No runs yet</div></div>
+        </div>
+      </div>
+
+    </div><!-- /projectView -->
+  </div><!-- /page-wrap -->
+
+  <!-- Artifact Preview Dialog -->
+  <div id="previewDialog" onclick="closePreview(event)">
+    <div id="previewBox">
+      <div class="modal-header">
+        <span class="modal-title" id="previewTitle">Artifact Preview</span>
+        <button class="btn-icon" onclick="document.getElementById('previewDialog').classList.remove('open')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <pre id="previewContent">Loading...</pre>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="js/global-nav.js?v=2026.03.15.1"></script>
+  <script>
+    const qp = new URLSearchParams(location.search);
+    const projectId = qp.get('id');
+
+    if (!projectId) {
+      document.getElementById('noProjectView').style.display = 'block';
+      document.getElementById('projectView').style.display  = 'none';
+    }
+
+    function esc(s) {
+      return String(s||'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    }
+
+    function pill(cls, text) {
+      return `<span class="pill ${cls}">${esc(text)}</span>`;
+    }
+
+    function statusPill(status) {
+      const s = (status||'').toLowerCase();
+      const m = { completed:'pill-done', done:'pill-done', failed:'pill-blocked', blocked:'pill-blocked',
+                  active:'pill-active', running:'pill-active', in_progress:'pill-active', pending:'pill-pending' };
+      return pill(m[s] || 'pill-muted', status.toUpperCase());
+    }
+
+    function rowClass(status) {
+      const s = (status||'').toLowerCase();
+      const m = { completed:'row-done', done:'row-done', failed:'row-failed', blocked:'row-blocked',
+                  active:'row-active', running:'row-active', in_progress:'row-active', pending:'row-pending' };
+      return m[s] || '';
+    }
+
+    async function j(u, o) {
+      const r = await fetch(u, o);
+      return r.json();
+    }
+
+    // GitHub Integration
+    let currentProjectGitHubRepo = null;
+    
+    function initGitHubPanel(project) {
+      const panel = document.getElementById('githubPanel');
+      if (!project) { panel.style.display = 'none'; return; }
+      panel.style.display = '';
+      
+      const repo = project.githubRepo;
+      if (repo) {
+        currentProjectGitHubRepo = repo;
+        document.getElementById('githubConfigSection').style.display = 'none';
+        document.getElementById('githubCommitSection').style.display = '';
+        document.getElementById('githubRepoDisplay').textContent = repo;
+        document.getElementById('githubRepoBadge').textContent = 'Connected';
+        document.getElementById('githubRepoBadge').className = 'pill pill-done';
+      } else {
+        currentProjectGitHubRepo = null;
+        document.getElementById('githubConfigSection').style.display = '';
+        document.getElementById('githubCommitSection').style.display = 'none';
+        document.getElementById('githubRepoBadge').textContent = 'Not Set';
+        document.getElementById('githubRepoBadge').className = 'pill pill-muted';
+      }
+    }
+    
+    async function saveGitHubRepo() {
+      const repo = document.getElementById('githubRepoInput').value.trim();
+      if (!repo || !repo.includes('/')) {
+        alert('Use format: owner/repo');
+        return;
+      }
+      try {
+        const res = await j(`/api/projects/${projectId}`, { method: 'PATCH', body: { githubRepo: repo } });
+        if (res.success) {
+          alert('GitHub repo saved!');
+          initGitHubPanel(res.project);
+        } else {
+          alert(res.error || 'Failed to save');
+        }
+      } catch (e) {
+        alert('Error: ' + e.message);
+      }
+    }
+    
+    function showCommitToGitHub() {
+      // Go to approvals page - commit is done there after approval
+      window.location.href = '/approvals.html';
+    }
+
+    async function loadTemplates() {
+      try {
+        const d = await j('/api/service-templates');
+        document.getElementById('template').innerHTML = (d.templates||[]).map(t =>
+          `<option value="${esc(t.key)}">${esc(t.name)}</option>`
+        ).join('');
+      } catch (e) {
+        document.getElementById('template').innerHTML = '<option value="">No templates found</option>';
+      }
+    }
+
+    function list(id, items, render, empty) {
+      const el = document.getElementById(id);
+      if (!items || !items.length) {
+        el.innerHTML = `<div class="empty-state"><div class="empty-state-dash">—</div><div class="empty-state-text">${esc(empty||'Nothing here')}</div></div>`;
+        return;
+      }
+      el.innerHTML = items.map(render).join('');
+    }
+
+    async function load() {
+      if (!projectId) return;
+      try {
+        const d = await j(`/api/projects/${projectId}/details`);
+
+        // Header
+        const name = d.project?.name || projectId;
+        document.getElementById('heading').textContent = name;
+        document.title = `AHM — ${name}`;
+
+        // Metrics
+        const p = d.performance || {};
+        document.getElementById('sRuns').textContent      = p.totalRuns   ?? '—';
+        document.getElementById('sCompleted').textContent = p.completed   ?? '—';
+        document.getElementById('sFailed').textContent    = p.failed      ?? '—';
+        document.getElementById('sApprovals').textContent = p.approvalsPending ?? '—';
+        document.getElementById('sArtifacts').textContent = p.artifacts   ?? '—';
+
+        // Approvals
+        list('approvals', d.approvals, a => `
+          <div class="data-row row-pending">
+            <div class="data-row-main">
+              <div class="data-row-title">${esc(a.title)}</div>
+              <div class="data-row-meta"><span>${esc(a.description||'')}</span></div>
+            </div>
+            <div class="data-row-aside">
+              ${statusPill(a.approvalStatus||a.column||'pending')}
+              <button class="btn btn-approve btn-sm" onclick="deliver('${a.id}')">Deliver</button>
+            </div>
+          </div>`, 'No pending approvals');
+
+        // Pipelines
+        list('pipelines', d.pipelines, p => `
+          <div class="data-row ${rowClass(p.status)}">
+            <div class="data-row-main">
+              <div class="data-row-title mono-sm">${esc(p.id)}</div>
+              <div class="data-row-meta"><span>${p.steps||0} steps</span></div>
+            </div>
+            <div class="data-row-aside">
+              ${statusPill(p.status)}
+              <button class="btn btn-danger btn-sm" onclick="cancelPipeline('${p.id}')">Cancel</button>
+            </div>
+          </div>`, 'No pipelines');
+
+        // Artifacts
+        const artifacts = d.artifacts || [];
+        document.getElementById('artifactCountBadge').textContent = artifacts.length;
+        if (!artifacts.length) {
+          document.getElementById('artifacts').innerHTML = `<div class="empty-state"><div class="empty-state-dash">—</div><div class="empty-state-text">No artifacts yet</div></div>`;
+        } else {
+          document.getElementById('artifacts').innerHTML = artifacts.map(a => {
+            const pth = a.path || '';
+            const fname = pth.split('/').pop() || 'artifact';
+            const isVerified = a.finalOutcome === 'artifact_verified';
+            return `
+              <div class="artifact-item">
+                <div class="artifact-icon">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${isVerified?'var(--green)':'var(--amber)'}" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                </div>
+                <div class="artifact-body">
+                  <div class="artifact-filename">${esc(fname)}</div>
+                  <div class="artifact-path">${esc(pth)}</div>
+                </div>
+                <div class="artifact-indicator ${isVerified?'verified':'response'}" title="${isVerified?'Verified':'Response file'}"></div>
+                <div class="artifact-actions">
+                  <button class="btn-icon" title="Preview artifact" onclick="previewArtifact('${esc(a.id||'')}','${esc(pth)}','${esc(fname)}')">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </button>
+                </div>
+              </div>`;
+          }).join('');
+        }
+
+        // Run History (handoffs)
+        list('handoffs', (d.handoffs||[]).slice(0,25), h => {
+          const ts = h.completedAt||h.responseAt||h.startedAt||h.createdAt;
+          const date = ts ? new Date(ts).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+          const hasArtifacts = h.artifacts && h.artifacts.length;
+          return `
+            <div class="data-row ${rowClass(h.status)}">
+              <div class="data-row-main">
+                <div class="data-row-title">${esc((h.task||'').substring(0,90))}</div>
+                <div class="data-row-meta">
+                  <span>→ ${esc(h.toAgent)}</span>
+                  <span>${esc(h.finalOutcome||'')}</span>
+                  <span>${date}</span>
+                </div>
+              </div>
+              <div class="data-row-aside">
+                ${statusPill(h.status)}
+                ${h.status==='failed'    ? `<button class="btn btn-ghost btn-sm" onclick="retryHandoff('${h.id}')">Retry</button>`:''}
+                ${['pending','in_progress'].includes(h.status) ? `<button class="btn btn-danger btn-sm" onclick="cancelHandoff('${h.id}')">Cancel</button>`:''}
+                ${hasArtifacts ? `<button class="btn btn-ghost btn-sm" onclick="inspectArtifacts('${h.id}')">Artifacts</button>`:''}
+              </div>
+            </div>`;
+        }, 'No runs yet');
+
+        // Client report link
+        const crl = document.getElementById('clientReportLink');
+        crl.href = `client-report.html?id=${encodeURIComponent(projectId)}`;
+        crl.style.display = '';
+
+        setConn(true);
+      } catch (e) {
+        console.error('Load failed:', e);
+        setConn(false);
+        showToast('Failed to load project data', 'err');
+      }
+
+      // Load health badge (non-blocking)
+      fetch(`/api/projects/${projectId}/health`)
+        .then(r => r.ok ? r.json() : null)
+        .then(h => {
+          if (!h) return;
+          const badge = document.getElementById('healthBadge');
+          const map = { healthy:'pill-done', attention:'pill-amber', blocked:'pill-blocked', new:'pill-muted' };
+          badge.className = `pill ${map[h.label] || 'pill-muted'}`;
+          badge.textContent = (h.label || 'unknown').toUpperCase();
+          badge.style.display = '';
+        })
+        .catch(() => {});
+
+      // Load run summaries (non-blocking)
+      fetch(`/api/projects/${projectId}/summaries`)
+        .then(r => r.ok ? r.json() : null)
+        .then(d => {
+          const summaries = d && d.summaries ? d.summaries : [];
+          if (!summaries.length) return;
+          document.getElementById('summariesSection').style.display = '';
+          document.getElementById('summaryCount').textContent = summaries.length;
+          const el = document.getElementById('runSummaries');
+          el.innerHTML = summaries.slice(0, 10).map(s => {
+            const summary = s.summary || {};
+            const ts = s.createdAt ? new Date(s.createdAt).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+            return `
+              <div class="data-row">
+                <div class="data-row-main">
+                  <div class="data-row-title mono-sm">${esc(s.pipelineId)}</div>
+                  <div class="data-row-meta">
+                    <span>Steps: ${summary.totalSteps ?? '—'}</span>
+                    <span>Completed: ${summary.completedSteps ?? '—'}</span>
+                    ${summary.artifactCount ? `<span>Artifacts: ${summary.artifactCount}</span>` : ''}
+                    <span>${ts}</span>
+                  </div>
+                  ${summary.notes ? `<div class="data-row-meta" style="margin-top:4px;color:var(--text-secondary);">${esc(summary.notes)}</div>` : ''}
+                </div>
+                <div class="data-row-aside">
+                  <span class="pill ${summary.success ? 'pill-done' : 'pill-blocked'}">${summary.success ? 'DONE' : 'PARTIAL'}</span>
+                </div>
+              </div>`;
+          }).join('');
+        })
+        .catch(() => {});
+    }
+
+    async function launchPipeline() {
+      const template = document.getElementById('template').value;
+      const task     = document.getElementById('task').value.trim();
+      const context  = document.getElementById('context').value.trim();
+      if (!template || !task) { showToast('Select a template and enter a task', 'warn'); return; }
+
+      try {
+        const meta = await j(`/api/projects/${projectId}/details`);
+        const res  = await j(`/api/service-template/${template}/launch`, {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ task, context, projectId, client: meta.project?.clientId, runAsync: true })
+        });
+        if (res.success) {
+          document.getElementById('task').value    = '';
+          document.getElementById('context').value = '';
+          showToast('Pipeline launched', 'ok');
+          setTimeout(load, 800);
+        } else {
+          showToast(res.error || 'Launch failed', 'err');
+        }
+      } catch (e) { showToast('Error: ' + e.message, 'err'); }
+    }
+
+    async function deliver(id) {
+      const note = prompt('Delivery note (optional):') || '';
+      try {
+        const res = await j(`/api/approvals/task/${id}/deliver`, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ note })
+        });
+        if (res.success) { showToast('Delivered', 'ok'); load(); }
+        else showToast(res.error || 'Failed', 'err');
+      } catch (e) { showToast('Error: ' + e.message, 'err'); }
+    }
+
+    async function retryHandoff(id) {
+      try {
+        const res = await j(`/api/handoff/${id}/retry`, { method: 'POST' });
+        if (res.success) { showToast('Retrying...', 'ok'); setTimeout(load, 1000); }
+        else showToast(res.error || 'Failed', 'err');
+      } catch (e) { showToast('Error: ' + e.message, 'err'); }
+    }
+
+    async function cancelHandoff(id) {
+      if (!confirm('Cancel this handoff?')) return;
+      try {
+        const res = await j(`/api/handoff/${id}/cancel`, { method: 'POST' });
+        if (res.success) { showToast('Cancelled', 'ok'); load(); }
+        else showToast(res.error || 'Failed', 'err');
+      } catch (e) { showToast('Error: ' + e.message, 'err'); }
+    }
+
+    async function cancelPipeline(id) {
+      if (!confirm('Cancel this pipeline?')) return;
+      try {
+        const res = await j(`/api/pipeline/${id}/cancel`, { method: 'POST' });
+        if (res.success) { showToast('Pipeline cancelled', 'ok'); load(); }
+        else showToast(res.error || 'Failed', 'err');
+      } catch (e) { showToast('Error: ' + e.message, 'err'); }
+    }
+
+    async function inspectArtifacts(handoffId) {
+      try {
+        const d = await j(`/api/handoff/${handoffId}/deliverables`);
+        if (!d.files || !d.files.length) { showToast('No artifacts found', 'warn'); return; }
+        const first = d.files[0];
+        previewArtifact(handoffId, first.path, first.path.split('/').pop());
+      } catch (e) { showToast('Error: ' + e.message, 'err'); }
+    }
+
+    async function previewArtifact(handoffId, path, filename) {
+      document.getElementById('previewTitle').textContent    = filename || 'Artifact';
+      document.getElementById('previewContent').textContent  = 'Loading...';
+      document.getElementById('previewDialog').classList.add('open');
+      try {
+        const res = await fetch(`/api/handoff/${handoffId}/artifact-preview?path=${encodeURIComponent(path)}`);
+        if (res.ok) {
+          const data = await res.json();
+          const content = data.content || data.preview || '';
+          document.getElementById('previewContent').textContent =
+            content.substring(0, 5000) + (content.length > 5000 ? '\n\n[truncated…]' : '');
+        } else {
+          document.getElementById('previewContent').textContent = `Path: ${path}\n\n(Preview unavailable)`;
+        }
+      } catch (e) {
+        document.getElementById('previewContent').textContent = `Path: ${path}\n\nError: ${e.message}`;
+      }
+    }
+
+    function closePreview(e) {
+      if (e.target === document.getElementById('previewDialog')) {
+        document.getElementById('previewDialog').classList.remove('open');
+      }
+    }
+
+    function setConn(ok) {
+      document.getElementById('connDot').className    = 'conn-dot ' + (ok ? 'live' : 'dead');
+      document.getElementById('connLabel').textContent = ok ? 'LIVE' : 'OFFLINE';
+    }
+
+    function showToast(msg, type) {
+      const c = document.getElementById('toastContainer');
+      const t = document.createElement('div');
+      t.className = `toast toast-${type||'ok'}`;
+      t.textContent = msg;
+      c.appendChild(t);
+      setTimeout(() => t.remove(), 3500);
+    }
+
+    // Boot
+    if (projectId) { loadTemplates().then(load); }
+    setInterval(() => { if (projectId) load(); }, 60000);
+  </script>
+</body>
+</html>
