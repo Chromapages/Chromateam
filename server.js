@@ -1050,12 +1050,16 @@ async function retryHandoff(handoff) {
   const maxAttempts = config.retry.maxAttempts;
   const currentAttempt = retryAttempts.get(handoff.id) || 0;
 
+  handoff.retryMeta = handoff.retryMeta || { attempts: 0, maxAttempts, history: [] };
+
   if (currentAttempt >= maxAttempts) {
     console.log(`❌ Handoff ${handoff.id} failed after ${maxAttempts} attempts`);
     handoff.status = 'failed';
+    handoff.failedAt = new Date().toISOString();
     handoff.error = `Failed after ${maxAttempts} attempts`;
+    handoff.failureReason = handoff.failureReason || 'retry_limit_exceeded';
+    handoff.retryMeta.attempts = currentAttempt;
     triggerWebhooks('HandoffFailed', handoff);
-    // P0: Persist state
     saveHandoffs();
     return;
   }
@@ -1064,11 +1068,21 @@ async function retryHandoff(handoff) {
 
   // Exponential backoff
   const backoffMs = config.retry.backoffMs * Math.pow(config.retry.backoffMultiplier, currentAttempt);
+  handoff.retryMeta.attempts = currentAttempt + 1;
+  handoff.retryMeta.lastScheduledAt = new Date().toISOString();
+  handoff.retryMeta.history.push({
+    attempt: currentAttempt + 1,
+    scheduledAt: handoff.retryMeta.lastScheduledAt,
+    backoffMs,
+    error: handoff.error || null,
+  });
   console.log(`⏳ Retrying ${handoff.id} in ${backoffMs}ms (attempt ${currentAttempt + 1}/${maxAttempts})`);
+  saveHandoffs();
 
   setTimeout(async () => {
     handoff.status = 'pending';
     handoff.error = null;
+    handoff.failureReason = null;
     processHandoff(handoff);
   }, backoffMs);
 }
@@ -3806,20 +3820,23 @@ async function syncToChromabase(pipeline, handoffs) {
 
 // Helper to ensure deliverables are written to disk before completing
 // FIX #3: Improved verification with better error handling - always shows agent response
-async function ensureDeliverablesReady(handoff, maxRetries = 3) {
+async function ensureDeliverablesReady(handoff, maxRetries = 6) {
   const executionTarget = handoff.executionTarget || normalizeExecutionTarget(handoff, handoff);
   if (executionTarget.workMode === WORK_MODE_IN_PLACE) {
-    console.log(`🔍 Skipping artifact verification for ${handoff.id}; configured for in-place work at ${executionTarget.workdir}`);
-    return {
+    const result = {
       verified: true,
       skipped: true,
       workMode: executionTarget.workMode,
       targetPath: executionTarget.targetPath,
       workdir: executionTarget.workdir,
     };
+    handoff.verification = { checkedAt: new Date().toISOString(), ...result };
+    return result;
   }
 
   const outputPaths = getArtifactSearchPaths(handoff);
+  const responseText = handoff.agentResponse || '';
+  const mentionedPaths = Array.from(responseText.matchAll(/`([^`]+)`/g)).map(m => m[1]).filter(Boolean);
 
   console.log(`🔍 Verifying deliverables for ${handoff.id}...`);
 
@@ -3835,19 +3852,22 @@ async function ensureDeliverablesReady(handoff, maxRetries = 3) {
               const stat = fs.statSync(fullPath);
               if (stat.isDirectory()) {
                 walkDir(fullPath);
-              } else {
-                // Skip hidden files
-                if (!item.startsWith('.')) {
-                  files.push({ name: item, size: stat.size });
-                }
+              } else if (!item.startsWith('.')) {
+                files.push({ name: item, size: stat.size, path: fullPath });
               }
             }
           }
           walkDir(outputPath);
 
-          if (files.length > 0) {
-            console.log(`   ✅ Verified (attempt ${attempt}): Found ${files.length} file(s) in ${outputPath}`);
-            return { verified: true, path: outputPath, files };
+          const referencedFiles = mentionedPaths.filter(p => fs.existsSync(p)).map(p => ({ name: path.basename(p), size: fs.statSync(p).size, path: p }));
+          const combinedFiles = files.length > 0 ? files : referencedFiles;
+
+          if (combinedFiles.length > 0) {
+            console.log(`   ✅ Verified (attempt ${attempt}): Found ${combinedFiles.length} file(s)`);
+            const result = { verified: true, path: outputPath, files: combinedFiles, attempt, checkedAt: new Date().toISOString() };
+            handoff.verification = result;
+            handoff.artifacts = combinedFiles.map(f => f.path || path.join(outputPath, f.name));
+            return result;
           }
         } catch (e) {
           console.log(`   ⚠️ Error scanning ${outputPath}: ${e.message}`);
@@ -3855,7 +3875,7 @@ async function ensureDeliverablesReady(handoff, maxRetries = 3) {
       }
     }
     console.log(`   ⏳ Attempt ${attempt}/${maxRetries}: No files found yet, waiting...`);
-    await new Promise(r => setTimeout(r, 2000));
+    await new Promise(r => setTimeout(r, 3000));
   }
 
   // FIX #3: Don't fail - just warn and return what we have
@@ -3872,12 +3892,16 @@ async function ensureDeliverablesReady(handoff, maxRetries = 3) {
         const saved = persistAgentResponseArtifact(outputPath, handoff.agentResponse, handoff.toAgent);
         if (saved) {
           console.log(`   📝 Fallback: Saved agent response as ${saved.fileName}`);
-          return {
+          const result = {
             verified: true,
             fallback: true,
             path: outputPath,
-            files: [{ name: saved.fileName, size: saved.cleanContent.length }]
+            files: [{ name: saved.fileName, size: saved.cleanContent.length, path: path.join(outputPath, saved.fileName) }],
+            checkedAt: new Date().toISOString(),
           };
+          handoff.verification = result;
+          handoff.artifacts = [path.join(outputPath, saved.fileName)];
+          return result;
         }
       } catch (e) {
         console.log(`   ⚠️ Fallback save failed: ${e.message}`);
@@ -3885,12 +3909,15 @@ async function ensureDeliverablesReady(handoff, maxRetries = 3) {
     }
   }
 
-  return {
+  const result = {
     verified: false,
     hasAgentResponse: !!handoff.agentResponse,
     agentResponse: handoff.agentResponse,
+    checkedAt: new Date().toISOString(),
     message: 'Verification timed out but agent completed - returning response'
   };
+  handoff.verification = result;
+  return result;
 }
 
 async function completeHandoff(handoff) {
@@ -4228,12 +4255,17 @@ async function processHandoff(handoff) {
       console.log(`✅ Agent ${handoff.toAgent} completed: ${(responseText || '').substring(0, 60)}...`);
 
       // Verify files are synced before marking as complete
-      await ensureDeliverablesReady(handoff);
+      const verification = await ensureDeliverablesReady(handoff);
+      handoff.finalOutcome = verification?.fallback ? 'response_fallback_saved' : (verification?.verified ? 'artifact_verified' : 'response_only');
+      saveHandoffs();
 
       await completeHandoff(handoff);
     } catch (agentErr) {
       console.error(`❌ Agent ${handoff.toAgent} failed:`, agentErr.message);
       handoff.error = agentErr.message;
+      handoff.failureReason = agentErr.message?.includes('timed out') ? 'agent_timeout' : 'agent_execution_error';
+      handoff.lastErrorAt = new Date().toISOString();
+      saveHandoffs();
 
       // Trigger retry logic
       await retryHandoff(handoff);
