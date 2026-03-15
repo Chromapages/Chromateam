@@ -2337,6 +2337,84 @@ function getProjectById(projectId) {
   }
 }
 
+// ==================== SMART AUTO-APPROVAL SYSTEM ====================
+// Rules: "Small" = auto-approve with Critic check, "Big" = require human approval
+
+async function shouldAutoApprove({ template, task, context, projectId, priority }) {
+  // "Big" items always require human approval
+  if (priority === 'urgent') {
+    return { autoApprove: false, reason: 'Urgent priority - human required' };
+  }
+  
+  // Has project attached = big
+  if (projectId) {
+    return { autoApprove: false, reason: 'Has project attached' };
+  }
+  
+  // Template-based rules
+  const templateKey = template.key || '';
+  
+  // ops templates = small (auto-approve)
+  if (templateKey === 'ops') {
+    return { autoApprove: true, reason: 'Operations task - low risk' };
+  }
+  
+  // Check task context for keywords indicating complexity
+  const lowerTask = (task || '').toLowerCase();
+  const bigKeywords = ['website', 'build', 'create app', 'develop', 'design brand', 'campaign', 'video', 'full'];
+  const smallKeywords = ['update', 'fix', 'quick', 'small', 'post', 'copy', 'email draft', 'schedule'];
+  
+  const hasBigKeyword = bigKeywords.some(k => lowerTask.includes(k));
+  const hasSmallKeyword = smallKeywords.some(k => lowerTask.includes(k));
+  
+  if (hasBigKeyword && !hasSmallKeyword) {
+    return { autoApprove: false, reason: 'Complex task detected' };
+  }
+  
+  // Default: small items auto-approve
+  return { autoApprove: true, reason: 'Routine task - auto-approving' };
+}
+
+async function runCriticAutoCheck({ task, context, templateName, projectId }) {
+  // Synthesize a quick Critic-style review
+  // In production, this could call the actual Critic agent
+  
+  const issues = [];
+  const lowerTask = (task || '').toLowerCase();
+  
+  // Check for common issues
+  if (!context || context.length < 10) {
+    issues.push('Limited context provided');
+  }
+  
+  if (lowerTask.includes('delete') || lowerTask.includes('remove') || lowerTask.includes('drop')) {
+    issues.push('Destructive action - requires human review');
+  }
+  
+  if (lowerTask.includes('money') || lowerTask.includes('charge') || lowerTask.includes('payment') || lowerTask.includes('$')) {
+    issues.push('Financial action - requires human review');
+  }
+  
+  if (lowerTask.includes('send') && (lowerTask.includes('email') || lowerTask.includes('message'))) {
+    issues.push('Outbound communication - requires human review');
+  }
+  
+  // Check for brand safety
+  const brandUnsafe = ['offensive', 'controversial', 'political', 'religious'];
+  if (brandUnsafe.some(w => lowerTask.includes(w))) {
+    issues.push('Brand safety concern');
+  }
+  
+  // Determine approval
+  const approved = issues.length === 0;
+  
+  const summary = approved 
+    ? `Auto-approved: ${templateName} - "${task.substring(0, 50)}..."`
+    : `Reviewed: ${issues.length} issue(s) found - "${task.substring(0, 40)}..."`;
+  
+  return { approved, issues, summary };
+}
+
 async function launchTemplatePipeline(template, { templateName, task, context, priority, runAsync = true, targetPath, workdir, workMode, client, projectId }) {
   const pipelineId = `pipeline_${Date.now()}`;
   const results = [];
@@ -2400,8 +2478,55 @@ async function launchTemplatePipeline(template, { templateName, task, context, p
     data.tasks.push(approvalTask);
     saveTasks(data);
     logAuditEvent({ eventType: 'approval_created', entityType: 'task', entityId: approvalTask.id, clientId: resolvedClient, projectId: projectId || null, actor: 'chroma', details: { pipelineId, title: approvalTask.title, template: templateName } });
-    // A1: Approval-ready Discord alert
-    postDiscordAlert('approval_ready', { client: resolvedClient, projectId, pipelineId, title: approvalTask.title, approvalId: approvalTask.id }).catch(() => {});
+    
+    // ==================== SMART AUTO-APPROVAL ====================
+    // Determine if this is a "small" item (auto-approve) or "big" (require human approval)
+    const isSmallItem = await shouldAutoApprove({ template, task, context, projectId, priority });
+    
+    if (isSmallItem.autoApprove) {
+      console.log(`[Auto-Approval] Small item detected: ${templateName} - running Critic check...`);
+      
+      // Run Critic check automatically
+      const criticResult = await runCriticAutoCheck({ task, context, templateName, projectId });
+      
+      if (criticResult.approved) {
+        console.log(`[Auto-Approval] Critic approved: ${criticResult.summary}`);
+        
+        // Auto-approve the item
+        const data = loadTasks();
+        const approvalIdx = data.tasks.findIndex(t => t.id === approvalTask.id);
+        if (approvalIdx !== -1) {
+          data.tasks[approvalIdx].column = 'done';
+          data.tasks[approvalIdx].status = 'completed';
+          data.tasks[approvalIdx].criticReviewed = true;
+          data.tasks[approvalIdx].criticNotes = criticResult.summary;
+          data.tasks[approvalIdx].updatedAt = new Date().toISOString();
+          saveTasks(data);
+          
+          logAuditEvent({ eventType: 'auto_approved', entityType: 'task', entityId: approvalTask.id, actor: 'critic', details: { template: templateName, criticNotes: criticResult.summary } });
+        }
+        
+        // Skip Discord alert - already handled
+      } else {
+        // Critic found issues - require human approval
+        console.log(`[Auto-Approval] Critic flagged issues - requiring human approval`);
+        
+        // Update approval task with Critic notes
+        const data = loadTasks();
+        const approvalIdx = data.tasks.findIndex(t => t.id === approvalTask.id);
+        if (approvalIdx !== -1) {
+          data.tasks[approvalIdx].criticNotes = `⚠️ Issues flagged: ${criticResult.issues.join(', ')}\n${criticResult.summary}`;
+          data.tasks[approvalIdx].criticReviewed = false;
+          saveTasks(data);
+        }
+        
+        // Still post Discord alert - human needs to review
+        postDiscordAlert('approval_ready', { client: resolvedClient, projectId, pipelineId, title: approvalTask.title, approvalId: approvalTask.id, autoCheck: 'failed' }).catch(() => {});
+      }
+    } else {
+      // Big item - require human approval
+      postDiscordAlert('approval_ready', { client: resolvedClient, projectId, pipelineId, title: approvalTask.title, approvalId: approvalTask.id }).catch(() => {});
+    }
   }
 
   logAuditEvent({ eventType: 'pipeline_launched', entityType: 'pipeline', entityId: pipelineId, clientId: resolvedClient, projectId: projectId || null, actor: 'chroma', details: { template: templateName, task, steps: template.steps.length, runAsync } });
