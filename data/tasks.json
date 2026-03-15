@@ -1,0 +1,204 @@
+{
+  "tasks": [
+    {
+      "id": "task_1773541943867_riulo",
+      "title": "Test task",
+      "description": "Test description",
+      "owner": "unassigned",
+      "priority": "high",
+      "column": "in_progress",
+      "doneCriteria": "Finish it",
+      "client": "chromapages",
+      "blockers": [],
+      "createdAt": "2026-03-15T02:32:23.867Z",
+      "updatedAt": "2026-03-15T02:32:32.808Z"
+    },
+    {
+      "id": "task_1773543218275_zi02e",
+      "title": "Test major build",
+      "description": "Verify critic fields",
+      "owner": "chroma",
+      "priority": "high",
+      "column": "backlog",
+      "doneCriteria": "200 OK + clean UI",
+      "criticChecklist": "What breaks if AHM drops? What assumptions are risky?",
+      "criticReviewed": true,
+      "client": "chromapages",
+      "blockers": [],
+      "createdAt": "2026-03-15T02:53:38.275Z",
+      "updatedAt": "2026-03-15T02:53:38.275Z"
+    },
+    {
+      "id": "task_1773549649031_jbu7k",
+      "title": "Competitor Research → Design Brief: Buddha's Hawaiian Bakery",
+      "description": "Research competitors for Buddha's Hawaiian Bakery",
+      "owner": "chroma",
+      "priority": "high",
+      "column": "in_progress",
+      "doneCriteria": "Both steps complete with deliverables",
+      "criticChecklist": "Prism delivers research; Canvas creates brief; files exist in output folder",
+      "criticReviewed": false,
+      "client": "buddhas",
+      "blockers": [],
+      "createdAt": "2026-03-15T04:40:49.031Z",
+      "updatedAt": "2026-03-15T04:40:49.031Z"
+    },
+    {
+      "id": "task_1773549719385_dyfp7",
+      "title": "Competitor Research → Design Brief: Buddha's Hawaiian Bakery",
+      "description": "Research competitors for Buddha's Hawaiian Bakery",
+      "owner": "chroma",
+      "priority": "high",
+      "column": "in_progress",
+      "doneCriteria": "Both steps complete with deliverables",
+      "criticChecklist": "Prism delivers research; Canvas creates brief; files exist in output folder",
+      "criticReviewed": false,
+      "client": "buddhas",
+      "blockers": [],
+      "createdAt": "2026-03-15T04:41:59.385Z",
+      "updatedAt": "2026-03-15T04:41:59.385Z"
+    },
+    {
+      "id": "task_1773549755146_nstya",
+      "title": "Competitor Research → Design Brief: Buddha's Hawaiian Bakery",
+      "description": "Research competitors for Buddha's Hawaiian Bakery",
+      "owner": "chroma",
+      "priority": "high",
+      "column": "in_progress",
+      "doneCriteria": "Both steps complete with deliverables",
+      "criticChecklist": "Prism delivers research; Canvas creates brief; files exist in output folder",
+      "criticReviewed": false,
+      "client": "buddhas",
+      "blockers": [],
+      "createdAt": "2026-03-15T04:42:35.146Z",
+      "updatedAt": "2026-03-15T04:42:35.146Z"
+    },
+    {
+      "id": "task_1773549837180_syppe",
+      "title": "Competitor Research → Design Brief: Buddha's Hawaiian Bakery",
+      "description": "test",
+      "owner": "chroma",
+      "priority": "high",
+      "column": "in_progress",
+      "doneCriteria": "Both steps complete with deliverables",
+      "criticChecklist": "Prism delivers research; Canvas creates brief; files exist in output folder",
+      "criticReviewed": false,
+      "client": "buddhas",
+      "blockers": [],
+      "createdAt": "2026-03-15T04:43:57.180Z",
+      "updatedAt": "2026-03-15T04:43:57.180Z"
+    },
+    {
+      "id": "task_1773549984586_u15ei",
+      "title": "Competitor Research → Design Brief: Buddha's Hawaiian Bakery",
+      "description": "Test pipeline with Buddha's",
+      "owner": "chroma",
+      "priority": "high",
+      "column": "in_progress",
+      "doneCriteria": "Both steps complete with deliverables",
+      "criticChecklist": "Prism delivers research; Canvas creates brief; files exist in output folder",
+      "criticReviewed": false,
+      "client": "buddhas",
+      "blockers": [],
+      "createdAt": "2026-03-15T04:46:24.586Z",
+      "updatedAt": "2026-03-15T04:46:24.586Z"
+    },
+    {
+      "id": "task_1773550576825_kx40q",
+      "title": "Competitor Research → Design Brief: Buddha's Hawaiian Bakery",
+      "description": "Test with fallback file saving",
+      "owner": "chroma",
+      "priority": "high",
+      "column": "in_progress",
+      "doneCriteria": "Both steps complete with deliverables",
+      "criticChecklist": "Prism delivers research; Canvas creates brief; files exist in output folder",
+      "criticReviewed": false,
+      "client": "buddhas",
+      "blockers": [],
+      "createdAt": "2026-03-15T04:56:16.825Z",
+      "updatedAt": "2026-03-15T04:56:16.825Z"
+    },
+    {
+      "id": "task_1773560000001_unt1",
+      "title": "UNT Tax Prep - Q1 Review",
+      "description": "Complete Q1 tax preparation review for UNT",
+      "owner": "chroma",
+      "priority": "high",
+      "column": "in_progress",
+      "doneCriteria": "Review complete, report delivered",
+      "client": "unt",
+      "blockers": [],
+      "createdAt": "2026-03-15T08:00:00.000Z",
+      "updatedAt": "2026-03-15T08:00:00.000Z"
+    },
+    {
+      "id": "task_1773560000002_unt2",
+      "title": "UNT Client Portal Setup",
+      "description": "Set up GoHighLevel portal for UNT",
+      "owner": "glyph",
+      "priority": "high",
+      "column": "todo",
+      "doneCriteria": "Portal live with onboarding flow",
+      "client": "unt",
+      "blockers": [],
+      "createdAt": "2026-03-15T08:01:00.000Z",
+      "updatedAt": "2026-03-15T08:01:00.000Z"
+    }
+  ],
+  "columns": [
+    {
+      "id": "backlog",
+      "label": "Backlog",
+      "color": "#71717A"
+    },
+    {
+      "id": "todo",
+      "label": "To Do",
+      "color": "#0055FF"
+    },
+    {
+      "id": "in_progress",
+      "label": "In Progress",
+      "color": "#D4860A"
+    },
+    {
+      "id": "blocked",
+      "label": "Blocked",
+      "color": "#E11934"
+    },
+    {
+      "id": "done",
+      "label": "Done",
+      "color": "#16A34A"
+    }
+  ],
+  "priorities": [
+    {
+      "id": "urgent",
+      "label": "Urgent",
+      "color": "#E11934"
+    },
+    {
+      "id": "high",
+      "label": "High",
+      "color": "#D4860A"
+    },
+    {
+      "id": "medium",
+      "label": "Medium",
+      "color": "#0055FF"
+    },
+    {
+      "id": "low",
+      "label": "Low",
+      "color": "#71717A"
+    }
+  ],
+  "owners": [
+    {
+      "id": "unassigned",
+      "label": "Unassigned",
+      "color": "#71717A"
+    }
+  ]
+}

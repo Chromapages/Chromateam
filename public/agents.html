@@ -1,0 +1,1258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; font-src 'self' https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; connect-src 'self' http://localhost:* https://localhost:*; img-src 'self' data:;">
+    <title>AHM — Agents</title>
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#09090B" media="(prefers-color-scheme: dark)">
+    <meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="AHM">
+    <link rel="apple-touch-icon" href="/icons/icon.svg">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="application-name" content="AHM">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body{background:#09090B;color:#fff;min-height:100vh}
+        *,*::before,*::after{border-radius:0!important}
+        
+        /* ═══════════════════════════════════════════════════════════════
+           THEME VARIABLES - CSS Custom Properties for Light/Dark Mode
+           ═══════════════════════════════════════════════════════════════ */
+        :root {
+            /* Background colors */
+            --bg-primary: #09090B;
+            --bg-secondary: #18181B;
+            --bg-tertiary: #27272A;
+            --bg-input: #09090B;
+            --bg-hover: #27272A;
+            --bg-scrollbar: #09090B;
+            --bg-modal-backdrop: rgba(9,9,11,0.85);
+            --bg-skeleton: #27272A;
+            --bg-shimmer: rgba(255,255,255,0.1);
+
+            /* Text colors */
+            --text-primary: #FFFFFF;
+            --text-secondary: #A1A1AA;
+            --text-muted: #71717A;
+            --text-label: #52525B;
+            --text-label-subtle: #3F3F46;
+            --text-online: #22C55E;
+
+            /* Border colors */
+            --border-primary: #27272A;
+            --border-hover: #52525B;
+            --border-focus: #0055FF;
+
+            /* Accent colors */
+            --accent-blue: #0055FF;
+            --accent-magenta: #FF00FF;
+            --accent-green: #22C55E;
+            --accent-orange: #FF8800;
+            --accent-red: #FF4444;
+        }
+
+        /* Light mode overrides */
+        [data-theme="light"] {
+            /* Background colors */
+            --bg-primary: #FFFFFF;
+            --bg-secondary: #F4F4F5;
+            --bg-tertiary: #E4E4E7;
+            --bg-input: #FFFFFF;
+            --bg-hover: #E4E4E7;
+            --bg-scrollbar: #F4F4F5;
+            --bg-modal-backdrop: rgba(255,255,255,0.9);
+            --bg-skeleton: #E4E4E7;
+            --bg-shimmer: rgba(0,0,0,0.05);
+
+            /* Text colors */
+            --text-primary: #09090B;
+            --text-secondary: #3F3F46;
+            --text-muted: #71717A;
+            --text-label: #A1A1AA;
+            --text-label-subtle: #D4D4D8;
+            --text-online: #16A34A;
+
+            /* Border colors */
+            --border-primary: #E4E4E7;
+            --border-hover: #D4D4D8;
+            --border-focus: #0055FF;
+        }
+
+        /* ── Theme toggle button ── */
+        .theme-toggle {
+            background: transparent;
+            border: 1px solid var(--border-primary);
+            color: var(--text-muted);
+            font-size: 0.6875rem;
+            font-weight: 600;
+            padding: 0.375rem 0.75rem;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.375rem;
+        }
+        .theme-toggle:hover {
+            border-color: var(--border-hover);
+            color: var(--text-primary);
+        }
+body{background:var(--bg-primary);color:var(--text-primary);font-family:'Inter','Helvetica Neue',sans-serif;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+        .b{border:1px solid var(--border-primary)}.bt{border-top:1px solid var(--border-primary)}.bb{border-bottom:1px solid var(--border-primary)}.br{border-right:1px solid var(--border-primary)}.bl{border-left:1px solid var(--border-primary)}
+        .label{font-size:.625rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--text-label);font-family:'Inter',sans-serif}
+        .metric{font-family:'JetBrains Mono',monospace;font-weight:700;line-height:1}
+        .mono{font-family:'JetBrains Mono',monospace}
+        @keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.3}}
+        .pulse{animation:pulse-dot 1.6s ease-in-out infinite}
+        .btn-primary{background:#FFF;color:#09090B;border:1px solid #FFF;font-size:.6875rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:.625rem 1.25rem;cursor:pointer;transition:background .1s,color .1s,border-color .1s;display:inline-flex;align-items:center;gap:.5rem}
+        .btn-primary:hover{background:var(--accent-magenta);border-color:var(--accent-magenta);color:var(--text-primary);}
+        .btn-ghost{background:transparent;color:var(--text-muted);border:1px solid var(--border-primary);font-size:.6875rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;padding:.625rem 1.25rem;cursor:pointer;transition:color .1s,border-color .1s;display:inline-flex;align-items:center;gap:.5rem}
+        .btn-ghost:hover{color:var(--text-primary);border-color:var(--text-label);}
+        .btn-takeover{background:transparent;color:var(--accent-blue);border:1px solid #0055FF;font-size:.6rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:.375rem .75rem;cursor:pointer;transition:background .1s,color .1s;font-family:'JetBrains Mono',monospace}
+        .btn-takeover:hover{background:var(--accent-blue);color:var(--text-primary);}
+        .btn-danger{background:transparent;color:var(--accent-magenta);border:1px solid #FF00FF;font-size:.6rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:.375rem .75rem;cursor:pointer;transition:background .1s,color .1s;font-family:'JetBrains Mono',monospace}
+        .btn-danger:hover{background:var(--accent-magenta);color:var(--text-primary);}
+        .chip{font-family:'JetBrains Mono',monospace;font-size:.5625rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:2px 6px}
+        .chip-active{background:var(--accent-blue)22;color:var(--accent-blue);border:1px solid #0055FF44}
+        .chip-done{background:#FFFFFF11;color:var(--text-secondary);border:1px solid var(--border-primary)}
+        .chip-pending{background:var(--accent-magenta)11;color:var(--accent-magenta);border:1px solid #FF00FF33}
+        .chip-failed{background:#FF000022;color:var(--accent-red);border:1px solid #FF444433}
+        .chip-busy{background:#FF880022;color:#FF8800;border:1px solid #FF880033}
+        .modal-backdrop{background:rgba(9,9,11,.85);backdrop-filter:blur(4px)}
+        .modal-box{background:var(--bg-secondary);border:1px solid var(--border-primary);width:100%;max-width:520px;box-shadow:8px 8px 0px #0055FF}
+        .field{background:var(--bg-primary);border:1px solid var(--border-primary);color:var(--text-primary);padding:.625rem .75rem;font-size:.8125rem;font-family:'Inter',sans-serif;width:100%;outline:none;transition:border-color .1s;appearance:none}
+        .field:focus{border-color:var(--accent-blue)}
+        .field option{background:var(--bg-secondary)}
+        ::-webkit-scrollbar{width:4px;height:4px}
+        ::-webkit-scrollbar-track{background:var(--bg-primary)}
+        ::-webkit-scrollbar-thumb{background:var(--bg-tertiary)}
+        ::-webkit-scrollbar-thumb:hover{background:var(--accent-blue)}
+        .bento{display:grid;gap:1px;background:var(--bg-tertiary)}
+        .nav-item{transition:color .1s,background .1s;cursor:pointer}
+        .nav-item:hover{background:var(--bg-tertiary);color:var(--text-primary);}
+        .nav-item.active{color:var(--text-primary);}
+        .nav-item.active::before{content:'';display:block;width:2px;height:100%;background:var(--accent-blue);position:absolute;left:0;top:0}
+        #sidebar{transition:transform .2s ease}
+        .agent-row{transition:background .1s;cursor:pointer}
+        .agent-row:hover{background:var(--bg-tertiary)}
+        .progress-bar{height:2px;background:var(--bg-tertiary);position:relative;overflow:hidden}
+        .progress-fill{height:100%;background:var(--accent-blue);transition:width .3s ease}
+        @keyframes shimmer{0%{opacity:.4}50%{opacity:.8}100%{opacity:.4}}
+        .skeleton{background:var(--bg-tertiary);animation:shimmer 1.5s ease-in-out infinite}
+    
+
+        /* ═══════════════════════════════════════════════════════════════
+           MOBILE OPTIMIZATION - Bottom Nav, Bottom Sheet, FAB, Touch Targets
+           ═══════════════════════════════════════════════════════════════ */
+
+        /* Bottom sheet for modals — leave space above bottom nav so buttons stay visible */
+        @media (max-width: 767px) {
+            #modal, [id$="-modal"] {
+                align-items: flex-end !important;
+                padding: 0 !important;
+            }
+            .modal-box {
+                max-width: 100% !important;
+                width: 100% !important;
+                max-height: calc(100vh - 56px - env(safe-area-inset-bottom) - 12px);
+                overflow-y: auto;
+                -webkit-overflow-scrolling: touch;
+                transform: translateY(100%);
+                transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+                box-shadow: 0 -4px 0 var(--accent-blue) !important;
+                padding-bottom: calc(88px + 12px + env(safe-area-inset-bottom));
+            }
+            .modal-box > .bt.px-6.py-4 {
+                position: sticky;
+                bottom: 0;
+                background: var(--bg-secondary);
+                z-index: 1;
+                margin-top: auto;
+                box-shadow: 0 -2px 0 var(--border-primary);
+            }
+            .modal-box.sheet-open {
+                transform: translateY(0);
+            }
+        }
+        .sheet-handle {
+            display: none;
+        }
+        @media (max-width: 767px) {
+            .sheet-handle {
+                display: block;
+                width: 36px; height: 4px;
+                background: var(--border-primary);
+                margin: 12px auto 4px;
+            }
+        }
+
+        /* Floating Action Button */
+        .fab {
+            display: none;
+            position: fixed;
+            bottom: calc(64px + env(safe-area-inset-bottom) + 12px);
+            right: 16px;
+            z-index: 39;
+            width: 48px; height: 48px;
+            background: var(--accent-blue);
+            color: #fff;
+            border: none; cursor: pointer;
+            font-size: 1.25rem;
+            align-items: center; justify-content: center;
+            box-shadow: 4px 4px 0 rgba(0,0,0,0.3);
+        }
+        @media (max-width: 1023px) { .fab { display: flex; } }
+
+        /* Touch targets */
+        @media (max-width: 1023px) {
+            .btn-ghost, .btn-primary, .btn-danger, .btn-takeover, .chip {
+                min-height: 44px;
+            }
+        }
+
+        /* Input font size fix for iOS */
+        @media (max-width: 767px) { .field { font-size: 16px !important; } }
+
+        /* Overscroll behavior */
+        @media (max-width: 1023px) {
+            html, body { overscroll-behavior: none; }
+            main { -webkit-overflow-scrolling: touch; }
+        }
+
+        /* Mobile detail panel overlay */
+        @media (max-width: 1023px) {
+            #detail-panel {
+                position: fixed; inset: 0;
+                z-index: 35; width: 100% !important;
+                transform: translateX(100%);
+                transition: transform 0.25s ease;
+            }
+            #detail-panel.open { transform: translateX(0); }
+        }
+        @media (min-width: 1024px) {
+            #detail-panel { display: flex !important; transform: none !important; position: static !important; width: 320px !important; }
+        }
+
+        /* Mobile card table for logs/pipelines */
+        @media (max-width: 639px) {
+            .log-row {
+                display: flex !important;
+                flex-direction: column !important;
+                gap: 4px;
+                padding: 12px 16px !important;
+            }
+            .log-row > *:not(:first-child) { font-size: 0.65rem; }
+            .log-row-id { font-weight: 700; }
+            .log-header-row, .pipeline-header-row { display: none !important; }
+            .pipeline-row {
+                display: flex !important;
+                flex-direction: column !important;
+                gap: 4px;
+                padding: 12px 16px !important;
+            }
+        }
+
+    
+        /* Detail panel close button */
+        #detail-panel .panel-close-btn { display: none; }
+        @media (max-width: 1023px) {
+            #detail-panel .panel-close-btn { display: block; }
+        }
+        /* Mobile top nav - hide primary CTAs (FAB handles them) */
+        @media (max-width: 1023px) {
+            header .btn-primary,
+            .header-actions .btn-primary {
+                display: none !important;
+            }
+        }
+
+    
+        /* ═══════════════════════════════════════════════════════════════
+           MOBILE v2 — CLEAN IMPLEMENTATION
+           ═══════════════════════════════════════════════════════════════ */
+
+        /* Viewport safety */
+        @media (max-width: 1023px) {
+            html, body { overscroll-behavior: none; }
+            main { -webkit-overflow-scrolling: touch; }
+        }
+
+
+
+        /* Bottom navigation bar */
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 56px;
+            background: var(--bg-primary);
+            border-top: 1px solid var(--border-primary);
+            display: none;
+            z-index: 40;
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+        @media (max-width: 1023px) {
+            .bottom-nav { 
+                display: grid; 
+                grid-template-columns: repeat(7, 1fr); 
+            }
+            main, body > .flex { 
+                padding-bottom: calc(64px + env(safe-area-inset-bottom)); 
+            }
+        }
+        .bottom-nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 2px;
+            font-size: 0.6rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            text-decoration: none;
+            color: var(--text-muted);
+            transition: color 0.15s;
+            min-height: 44px;
+        }
+        .bottom-nav-item.active { color: var(--accent-blue); }
+        .bottom-nav-item .nav-icon { font-size: 1.1rem; line-height: 1; }
+
+        /* Bottom sheet modals */
+        .sheet-handle {
+            display: none;
+            width: 36px;
+            height: 4px;
+            background: var(--border-primary);
+            margin: 12px auto 8px;
+            border-radius: 2px;
+        }
+        @media (max-width: 767px) {
+            .sheet-handle { display: block; }
+            .modal-backdrop, #modal, [id$="-modal"] {
+                align-items: flex-end !important;
+                padding: 0 !important;
+            }
+            .modal-box {
+                max-width: 100% !important;
+                width: 100% !important;
+                max-height: calc(100vh - 56px - env(safe-area-inset-bottom) - 12px);
+                overflow-y: auto;
+                -webkit-overflow-scrolling: touch;
+                transform: translateY(100%);
+                opacity: 0;
+                transition: transform .35s cubic-bezier(.32,.72,0,1), opacity .2s ease;
+                box-shadow: 0 -4px 0 var(--accent-blue) !important;
+                padding-bottom: calc(88px + 12px + env(safe-area-inset-bottom));
+            }
+            .modal-box > .bt.px-6.py-4 {
+                position: sticky;
+                bottom: 0;
+                background: var(--bg-secondary);
+                z-index: 1;
+                margin-top: auto;
+                box-shadow: 0 -2px 0 var(--border-primary);
+            }
+            .modal-box.sheet-open {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        /* FAB */
+        .fab {
+            display: none;
+            position: fixed;
+            bottom: calc(64px + env(safe-area-inset-bottom) + 16px);
+            right: 16px;
+            z-index: 39;
+            width: 52px;
+            height: 52px;
+            background: var(--accent-blue);
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            font-size: 1.5rem;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 4px 4px 0 rgba(0,0,0,0.4);
+            transition: transform .15s ease;
+        }
+        .fab:active { transform: scale(0.92); }
+        @media (max-width: 1023px) { .fab { display: flex; } }
+
+        /* Hide primary CTA buttons in header on mobile */
+        @media (max-width: 1023px) {
+            header .btn-primary, .header-actions .btn-primary { 
+                display: none !important; 
+            }
+        }
+
+        /* Touch targets */
+        @media (max-width: 1023px) {
+            .btn-ghost, .btn-primary, .btn-danger, .btn-takeover, .chip,
+            select, input[type="text"], input[type="number"], textarea { 
+                min-height: 44px; 
+            }
+        }
+
+        /* Input font-size fix (iOS zoom prevention) */
+        @media (max-width: 767px) {
+            input, select, textarea, .field { font-size: 16px !important; }
+        }
+
+        /* Mobile card-stack tables */
+        @media (max-width: 639px) {
+            .log-row, .pipeline-row { 
+                display: flex !important; 
+                flex-direction: column !important;
+                gap: 6px; 
+                padding: 12px 16px !important; 
+                border-bottom: 1px solid var(--border-primary);
+            }
+            .log-header-row, .pipeline-header-row { 
+                display: none !important; 
+            }
+        }
+
+        /* Detail panel as overlay on mobile */
+        @media (max-width: 1023px) {
+            #detail-panel {
+                position: fixed !important;
+                inset: 0;
+                z-index: 35;
+                width: 100% !important;
+                max-width: 100vw;
+                transform: translateX(100%);
+                transition: transform .25s ease;
+                background: var(--bg-primary) !important;
+            }
+            #detail-panel.panel-open { 
+                transform: translateX(0); 
+            }
+            #detail-panel.panel-open ~ .panel-overlay-backdrop {
+                display: block;
+            }
+        }
+        .panel-overlay-backdrop {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 34;
+        }
+
+        /* Panel close button (mobile only) */
+        .panel-close-btn { display: none; }
+        @media (max-width: 1023px) {
+            .panel-close-btn {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 4px;
+                width: 100%;
+                min-height: 44px;
+                background: var(--bg-secondary);
+                border: 1px solid var(--border-primary);
+                color: var(--text-primary);
+                font-size: 0.7rem;
+                font-weight: 700;
+                letter-spacing: 0.1em;
+                text-transform: uppercase;
+                cursor: pointer;
+                margin-bottom: 8px;
+            }
+        }
+
+    
+        /* ═══════════════════════════════════════════════════════════════
+           COLLAPSIBLE SIDEBAR (Desktop)
+           ═══════════════════════════════════════════════════════════════ */
+        
+        /* Sidebar collapsed state on desktop */
+        @media (min-width: 1024px) {
+            #sidebar {
+                transition: width 0.25s ease, transform 0.25s ease;
+            }
+            #sidebar.collapsed {
+                width: 48px !important;
+            }
+            #sidebar.collapsed .nav-item span:not(.nav-icon),
+            #sidebar.collapsed .sidebar-label,
+            #sidebar.collapsed .sidebar-footer {
+                display: none;
+            }
+            #sidebar.collapsed .nav-item {
+                justify-content: center;
+                padding-left: 0;
+                padding-right: 0;
+            }
+            #sidebar.collapsed .bb.px-4 {
+                padding-left: 0.75rem;
+                padding-right: 0.75rem;
+            }
+            /* Expand main content when sidebar collapsed */
+            #sidebar.collapsed ~ main,
+            body:has(#sidebar.collapsed) main {
+                margin-left: 0;
+            }
+        }
+        
+        /* Sidebar toggle button (visible on all sizes) */
+        #sidebar-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            padding: 0;
+        }
+
+    
+                        /* ═══════════════════════════════════════════════════════════════
+           MOBILE: ONLY BOTTOM NAV - NO SIDEBAR (REDO 2)
+           ═══════════════════════════════════════════════════════════════ */
+        @media (max-width: 1023px) {
+            /* Force the sidebar container to disappear */
+            #sidebar {
+                display: none !important;
+                width: 0 !important;
+                height: 0 !important;
+                position: absolute !important;
+                visibility: hidden !important;
+                overflow: hidden !important;
+                opacity: 0 !important;
+                pointer-events: none !important;
+                z-index: -9999 !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                border: none !important;
+                flex: none !important;
+                min-width: 0 !important;
+                max-width: 0 !important;
+            }
+            
+            /* Hide the toggle button */
+            #sidebar-toggle {
+                display: none !important;
+                visibility: hidden !important;
+            }
+            
+            /* Ensure the main content area takes up the full width and has no margin */
+            body > .flex > main,
+            main.flex-1 {
+                margin-left: 0 !important;
+                width: 100% !important;
+                max-width: 100vw !important;
+                flex: 1 1 100% !important;
+                padding-bottom: calc(64px + env(safe-area-inset-bottom)) !important;
+            }
+            
+            /* Ensure the flex container itself doesn't have weird margins */
+            body > .flex {
+                width: 100vw !important;
+                max-width: 100vw !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                overflow-x: hidden !important;
+                display: block !important; /* Break the flex layout on mobile to prevent sidebar from taking space */
+            }
+            
+            /* Make sure bottom nav is visible */
+            .bottom-nav {
+                display: grid !important;
+                position: fixed !important;
+                bottom: 0 !important;
+                left: 0 !important;
+                right: 0 !important;
+                z-index: 9999 !important;
+            }
+        }
+
+    </style>
+    <link rel="stylesheet" href="css/global-nav.css">
+</head>
+<body class="h-screen flex flex-col overflow-hidden">
+
+    <script>
+        // CRITICAL: Force remove sidebar on mobile before it even renders
+        if (window.innerWidth < 1024) {
+            document.write('<style>#sidebar { display: none !important; width: 0 !important; max-width: 0 !important; min-width: 0 !important; flex: 0 !important; border: none !important; margin: 0 !important; padding: 0 !important; position: absolute !important; } main { margin-left: 0 !important; width: 100vw !important; max-width: 100vw !important; flex: 1 !important; }</style>');
+            
+            // Also actually remove it from the DOM once loaded
+            document.addEventListener('DOMContentLoaded', () => {
+                const sidebar = document.getElementById('sidebar');
+                if (sidebar) sidebar.remove();
+                
+                const main = document.querySelector('main');
+                if (main) {
+                    main.style.marginLeft = '0';
+                    main.style.width = '100vw';
+                    main.style.maxWidth = '100vw';
+                }
+            });
+        }
+    </script>
+    
+
+    <!-- TOP NAV -->
+    <header class="bb flex items-center justify-between px-4 md:px-6 h-12 shrink-0 z-30 relative w-full" style="background:var(--bg-primary)">
+        <div class="flex items-center gap-4">
+            <button id="sidebar-toggle" class="hidden lg:flex btn-ghost px-2 py-1 text-xs">☰</button>
+            <div class="flex items-center gap-3">
+                <div class="w-5 h-5 b flex items-center justify-center" style="border-color:var(--accent-blue)">
+                    <div class="w-2 h-2" style="background:var(--accent-blue)"></div>
+                </div>
+                <span class="font-mono font-bold text-xs tracking-widest uppercase text-white">AHM</span>
+                <span class="label hidden sm:inline" style="color:var(--text-label-subtle)">Agent Handoff Manager</span>
+            </div>
+        </div>
+        <div class="hidden md:flex items-center gap-6">
+            <div class="flex items-center gap-2">
+                <span class="w-1.5 h-1.5 pulse" style="background:var(--accent-green);display:inline-block"></span>
+                <span class="mono text-xs font-bold" style="color:var(--text-online)">ONLINE</span>
+            </div>
+            <div class="label" id="header-time">—</div>
+        </div>
+        <div class="flex items-center gap-2">
+            <button onclick="toggleTheme()" class="theme-toggle" title="Toggle light/dark mode"><span id="theme-icon">☀</span> <span id="theme-label" class="hidden sm:inline">LIGHT</span></button>
+            <button onclick="refresh()" class="btn-ghost px-3 py-1.5 text-xs hidden sm:flex">↻ REFRESH</button>
+            <button onclick="openHandoffModal()" class="btn-primary px-4 py-1.5 text-xs">+ NEW HANDOFF</button>
+        </div>
+    </header>
+
+    <!-- BODY LAYOUT -->
+    <div class="flex flex-1 overflow-hidden relative">
+
+        <!-- SIDEBAR NAV -->
+        <nav id="sidebar" class="hidden lg:flex collapsed closed lg:translate-x-0 absolute lg:relative z-20 h-full flex flex-col bb-0 br shrink-0" style="width:200px;background:var(--bg-primary);border-color:var(--border-primary)">
+            <div class="bb px-4 py-3"><span class="label" style="color:var(--text-label-subtle)">Navigation</span></div>
+            <ul class="flex flex-col py-2 flex-1">
+                <li><a href="/dashboard" class="nav-item relative flex items-center gap-3 px-4 py-2.5 text-sm font-medium" style="color:var(--text-label)"><span class="w-3.5 h-3.5 flex items-center justify-center text-xs">⊞</span> Dashboard</a></li>
+                <li><a href="/agents" class="nav-item active relative flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-white"><span class="w-3.5 h-3.5 flex items-center justify-center text-xs">◈</span> Agents</a></li>
+                <li><a href="/office" class="nav-item relative flex items-center gap-3 px-4 py-2.5 text-sm font-medium" style="color:var(--text-label)"><span class="w-3.5 h-3.5 flex items-center justify-center text-xs">⌂</span> Office</a></li>
+                <li><a href="/pipelines" class="nav-item relative flex items-center gap-3 px-4 py-2.5 text-sm font-medium" style="color:var(--text-label)"><span class="w-3.5 h-3.5 flex items-center justify-center text-xs">⇄</span> Pipelines</a></li>
+                <li><a href="/crm" class="nav-item relative flex items-center gap-3 px-4 py-2.5 text-sm font-medium" style="color:var(--text-label)"><span class="w-3.5 h-3.5 flex items-center justify-center text-xs">▣</span> CRM</a></li>
+                <li><a href="/logs" class="nav-item relative flex items-center gap-3 px-4 py-2.5 text-sm font-medium" style="color:var(--text-label)"><span class="w-3.5 h-3.5 flex items-center justify-center text-xs">≡</span> Logs</a></li>
+                <li><a href="/settings" class="nav-item relative flex items-center gap-3 px-4 py-2.5 text-sm font-medium" style="color:var(--text-label)"><span class="w-3.5 h-3.5 flex items-center justify-center text-xs">⚙</span> Settings</a></li>
+            </ul>
+            <div class="bb bt px-4 py-3 mt-auto"><span class="mono text-xs" style="color:var(--text-label-subtle)">v3.0.0</span></div>
+        </nav>
+
+        <!-- MAIN CONTENT -->
+        <main class="flex-1 w-full overflow-y-auto overflow-x-hidden" style="background:var(--bg-primary)">
+            <div class="p-4 md:p-6 space-y-1">
+
+                <!-- PAGE HEADER -->
+                <div class="bb pb-4 mb-4 flex items-start justify-between" style="border-color:var(--border-primary)">
+                    <div>
+                        <div class="label mb-1" style="color:var(--text-label-subtle)">System Registry</div>
+                        <h1 class="text-xl font-bold text-white tracking-tight">Agent Network</h1>
+                        <p class="label mt-1" style="color:var(--text-label)">All registered agents, roles, and current workload status</p>
+                    </div>
+                    <div class="flex items-center gap-2 mt-1">
+                        <span class="chip chip-active" id="total-agents-chip">— AGENTS</span>
+                        <span class="chip chip-done" id="active-agents-chip">— ACTIVE</span>
+                    </div>
+                </div>
+
+                <!-- METRICS ROW -->
+                <section>
+                    <div class="bento grid-cols-2 lg:grid-cols-4">
+                        <div style="background:var(--bg-secondary);padding:1.25rem 1.5rem;min-height:6rem;display:flex;flex-direction:column;justify-content:space-between">
+                            <span class="label">Total Agents</span>
+                            <div><div class="metric text-3xl text-white" id="m-total">—</div><div class="label mt-1" style="color:var(--text-label-subtle)">Registered</div></div>
+                        </div>
+                        <div style="background:var(--bg-secondary);padding:1.25rem 1.5rem;min-height:6rem;display:flex;flex-direction:column;justify-content:space-between">
+                            <span class="label">Working</span>
+                            <div><div class="metric text-3xl" style="color:var(--accent-blue)" id="m-working">—</div><div class="label mt-1" style="color:var(--text-label-subtle)">In progress</div></div>
+                        </div>
+                        <div style="background:var(--bg-secondary);padding:1.25rem 1.5rem;min-height:6rem;display:flex;flex-direction:column;justify-content:space-between">
+                            <span class="label">Available</span>
+                            <div><div class="metric text-3xl" style="color:var(--text-online)" id="m-available">—</div><div class="label mt-1" style="color:var(--text-label-subtle)">Idle / ready</div></div>
+                        </div>
+                        <div style="background:var(--bg-secondary);padding:1.25rem 1.5rem;min-height:6rem;display:flex;flex-direction:column;justify-content:space-between">
+                            <span class="label">Overloaded</span>
+                            <div><div class="metric text-3xl" style="color:#FF8800" id="m-busy">—</div><div class="label mt-1" style="color:var(--text-label-subtle)">Queue &gt; 3</div></div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- MAIN AGENTS -->
+                <section class="pt-1">
+                    <div class="label mb-3 flex items-center gap-2">
+                        <span class="w-3 h-px inline-block" style="background:var(--bg-tertiary)"></span>
+                        Main Agents
+                    </div>
+                    <div id="main-agents-grid" class="bento grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                        <div class="skeleton" style="height:10rem;background:var(--bg-secondary)"></div>
+                        <div class="skeleton" style="height:10rem;background:var(--bg-secondary)"></div>
+                        <div class="skeleton" style="height:10rem;background:var(--bg-secondary)"></div>
+                        <div class="skeleton" style="height:10rem;background:var(--bg-secondary)"></div>
+                    </div>
+                </section>
+
+                <!-- SUB AGENTS -->
+                <section class="pt-1">
+                    <div class="label mb-3 flex items-center gap-2">
+                        <span class="w-3 h-px inline-block" style="background:var(--bg-tertiary)"></span>
+                        Sub-Agents
+                    </div>
+                    <div id="sub-agents-grid" class="bento grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                        <div class="skeleton" style="height:9rem;background:var(--bg-secondary)"></div>
+                        <div class="skeleton" style="height:9rem;background:var(--bg-secondary)"></div>
+                    </div>
+                </section>
+
+                <!-- WORKLOAD TABLE -->
+                <section class="pt-1">
+                    <div class="b" style="background:var(--bg-secondary);border:none">
+                        <div class="bb px-4 py-2.5 flex items-center justify-between" style="border-color:var(--border-primary)">
+                            <span class="label">Workload Overview</span>
+                            <span class="mono text-xs" style="color:var(--text-label-subtle)">ALL HANDOFFS</span>
+                        </div>
+                        <!-- Header -->
+                        <div class="grid px-4 py-2 bb" style="grid-template-columns:2rem 10rem 6rem 6rem 5rem 5rem 5rem 1fr;gap:.5rem;border-color:var(--border-primary)">
+                            <span class="label">#</span>
+                            <span class="label">Agent</span>
+                            <span class="label">Role</span>
+                            <span class="label">Status</span>
+                            <span class="label text-right">Pending</span>
+                            <span class="label text-right">In Prog</span>
+                            <span class="label text-right">Done</span>
+                            <span class="label">Reports To</span>
+                        </div>
+                        <div id="workload-table" style="max-height:400px;overflow-y:auto">
+                            <div class="p-6 mono text-xs text-center" style="color:var(--text-label-subtle)">Loading agent data…</div>
+                        </div>
+                    </div>
+                </section>
+
+            </div>
+        </main>
+
+        <!-- AGENT DETAIL PANEL -->
+        <aside id="detail-panel" class="hidden xl:flex flex-col shrink-0 bl overflow-y-auto" style="width:300px;background:var(--bg-primary);border-color:var(--border-primary)">
+            <div class="bb px-4 py-2.5 flex items-center justify-between" style="border-color:var(--border-primary)">
+                <span class="label">Agent Detail</span>
+                <button onclick="closeDetail()" class="label hover:text-white transition-colors">✕ CLOSE</button>
+            </div><div id="detail-content" class="p-4 flex flex-col gap-4">
+                <div class="mono text-xs text-center p-6" style="color:var(--text-label-subtle)">Select an agent to inspect.</div>
+            </div>
+        </aside>
+
+    <div class="panel-overlay-backdrop" onclick="mobileToggleDetailPanel(false)"></div>
+        </div>
+
+    <!-- HANDOFF MODAL -->
+    <div id="modal" class="fixed inset-0 modal-backdrop hidden z-50 items-center justify-center p-4">
+        <div class="modal-box flex flex-col">
+            <div class="sheet-handle"></div>
+            <div class="bb px-6 py-4 flex items-center justify-between" style="border-color:var(--border-primary)">
+                <div>
+                    <div class="label mb-1">Operator Console</div>
+                    <h3 class="font-bold tracking-tight text-white text-base">INITIALIZE HANDOFF</h3>
+                </div>
+                <button onclick="closeModal()" class="label hover:text-white transition-colors text-xl leading-none">✕</button>
+            </div>
+            <div class="p-6 space-y-5">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="label block mb-2">Source Agent</label>
+                        <select id="fromAgent" class="field">
+                            <option value="chroma">CHROMA</option>
+                            <option value="bender">BENDER</option>
+                            <option value="pixel">PIXEL</option>
+                            <option value="canvas">CANVAS</option>
+                            <option value="flux">FLUX</option>
+                            <option value="prism">PRISM</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="label block mb-2">Target Agent</label>
+                        <select id="toAgent" class="field">
+                            <option value="bender">BENDER</option>
+                            <option value="pixel">PIXEL</option>
+                            <option value="prism">PRISM</option>
+                            <option value="canvas">CANVAS</option>
+                            <option value="flux">FLUX</option>
+                            <option value="chroma">CHROMA</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label class="label block mb-2">Priority</label>
+                    <select id="priority" class="field">
+                        <option value="medium">MEDIUM</option>
+                        <option value="high">HIGH</option>
+                        <option value="low">LOW</option>
+                        <option value="urgent">URGENT</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="label block mb-2">Client</label>
+                    <select id="client" class="field">
+                        <option value="">No client</option>
+                        <option value="unt">UNT</option>
+                        <option value="buddhas">Buddha's</option>
+                        <option value="chromapages">Chromapages</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="label block mb-2">Task Directive</label>
+                    <textarea id="task" rows="4" placeholder="Enter precise task directives…" class="field resize-none"></textarea>
+                </div>
+                <div>
+                    <label class="label block mb-2">Context Reference <span style="color:var(--text-label-subtle)">(optional)</span></label>
+                    <input type="text" id="context" placeholder="URL, handoff ID, or reference" class="field">
+                </div>
+            </div>
+            <div class="bt px-6 py-4 flex gap-3" style="border-color:var(--border-primary)">
+                <button onclick="closeModal()" class="btn-ghost flex-1 justify-center">ABORT</button>
+                <button onclick="createHandoff()" class="btn-primary flex-1 justify-center" id="submit-btn">EXECUTE HANDOFF</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ═══════════════════════════════════════════════════════════════
+        // THEME MANAGEMENT - Light/Dark Mode Toggle
+        // ═══════════════════════════════════════════════════════════════
+        const THEME_KEY = 'ahm-theme-preference';
+
+        function getStoredTheme() {
+            try {
+                return localStorage.getItem(THEME_KEY) || 'dark';
+            } catch (e) {
+                return 'dark';
+            }
+        }
+
+        function setStoredTheme(theme) {
+            try {
+                localStorage.setItem(THEME_KEY, theme);
+            } catch (e) {
+                // Ignore storage errors
+            }
+        }
+
+        function applyTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme);
+            const icon = document.getElementById('theme-icon');
+            const label = document.getElementById('theme-label');
+            if (icon) icon.textContent = theme === 'dark' ? '☀' : '☾';
+            if (label) label.textContent = theme === 'dark' ? 'LIGHT' : 'DARK';
+        }
+
+        function toggleTheme() {
+            const current = document.documentElement.getAttribute('data-theme') || 'dark';
+            const next = current === 'dark' ? 'light' : 'dark';
+            applyTheme(next);
+            setStoredTheme(next);
+        }
+
+        // Initialize theme on load
+        document.addEventListener('DOMContentLoaded', () => {
+            applyTheme(getStoredTheme());
+        });
+
+
+        // ── Config ──
+        const STATUS_COLORS = { working:'#0055FF', in_progress:'#0055FF', available:'#22C55E', busy:'#FF8800', idle:'#3F3F46' };
+        const CHIP_CLASS = { working:'chip-active', in_progress:'chip-active', available:'chip-done', busy:'chip-busy', idle:'chip-done' };
+
+        let selectedAgent = null;
+        let agentData = {};
+
+        // ── Clock ──
+        setInterval(() => {
+            const el = document.getElementById('header-time');
+            if (el) el.textContent = new Date().toISOString().replace('T',' ').slice(0,19) + ' UTC';
+        }, 1000);
+
+        // ── Main Refresh ──
+        async function refresh() {
+            try {
+                const r = await fetch('/api/agents');
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                const d = await r.json();
+                agentData = d.agents || {};
+                renderAll(agentData);
+            } catch (e) {
+                console.error('[AHM] Agents sync error:', e);
+            }
+        }
+
+        function renderAll(agents) {
+            const entries = Object.entries(agents);
+            const mainAgents = entries.filter(([,a]) => !a.parent);
+            const subAgents = entries.filter(([,a]) => !!a.parent);
+
+            // Metrics
+            const working = entries.filter(([,a]) => a.status === 'working' || a.status === 'in_progress').length;
+            const available = entries.filter(([,a]) => a.status === 'available').length;
+            const busy = entries.filter(([,a]) => a.status === 'busy').length;
+
+            setText('m-total', entries.length);
+            setText('m-working', working);
+            setText('m-available', available);
+            setText('m-busy', busy);
+            setText('total-agents-chip', entries.length + ' AGENTS');
+            setText('active-agents-chip', working + ' ACTIVE');
+            document.getElementById('total-agents-chip').className = 'chip chip-active';
+            document.getElementById('active-agents-chip').className = 'chip ' + (working > 0 ? 'chip-active' : 'chip-done');
+
+            renderAgentGrid('main-agents-grid', mainAgents, true);
+            renderAgentGrid('sub-agents-grid', subAgents, false);
+            renderWorkloadTable(entries);
+
+            if (selectedAgent && agents[selectedAgent]) {
+                openDetail(selectedAgent, agents[selectedAgent]);
+            }
+        }
+
+        function renderAgentGrid(containerId, entries, isMain) {
+            const el = document.getElementById(containerId);
+            if (!el) return;
+            if (entries.length === 0) {
+                el.innerHTML = '<div class="p-6 mono text-xs col-span-full" style="color:var(--text-label-subtle)">No agents in this category.</div>';
+                return;
+            }
+
+            el.style.background = '#27272A';
+            el.innerHTML = entries.map(([id, a]) => {
+                const isWorking = a.status === 'working' || a.status === 'in_progress';
+                const isBusy = a.status === 'busy';
+                const barColor = isWorking ? '#0055FF' : isBusy ? '#FF8800' : '#27272A';
+                const chipClass = CHIP_CLASS[a.status] || 'chip-done';
+                const statusLabel = (a.status || 'IDLE').toUpperCase();
+                const isSelected = selectedAgent === id;
+                const pending = a.pendingCount || a.workload || 0;
+                const workloadPct = Math.min(100, pending * 20);
+
+                return `
+                <div onclick="openDetail('${id}', ${JSON.stringify(a).replace(/"/g,'&quot;')})"
+                     style="background:var(--bg-secondary);padding:1.25rem;display:flex;flex-direction:column;gap:.75rem;min-height:${isMain?'10rem':'9rem'};cursor:pointer;position:relative;overflow:hidden;border:${isSelected?'1px solid #0055FF':'none'};transition:background .15s">
+                    <!-- Top -->
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+                        <div>
+                            <div class="mono font-bold text-white" style="font-size:.8125rem;letter-spacing:.06em">${(a.name || id).toUpperCase()}</div>
+                            <div class="label mt-0.5" style="color:var(--text-label)">${a.role || '—'}</div>
+                        </div>
+                        <span class="chip ${chipClass}">${statusLabel}</span>
+                    </div>
+                    <!-- Workload -->
+                    <div>
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                            <span class="label" style="color:var(--text-label-subtle)">Pending Tasks</span>
+                            <span class="mono text-xs font-bold text-white">${pending}</span>
+                        </div>
+                        <div class="progress-bar"><div class="progress-fill" style="width:${workloadPct}%;background:${barColor}"></div></div>
+                    </div>
+                    <!-- Reports to -->
+                    <div class="label" style="color:var(--text-label-subtle)">→ ${(a.reportsTo || 'eric').toUpperCase()}</div>
+                    <!-- Actions -->
+                    <div style="display:flex;gap:4px">
+                        <button onclick="event.stopPropagation();openHandoffModalTo('${id}')" class="btn-takeover" style="font-size:.55rem">SEND TASK</button>
+                        ${isWorking ? `<button onclick="event.stopPropagation();releaseAgent('${id}')" class="btn-danger" style="font-size:.55rem">RELEASE</button>` : ''}
+                    </div>
+                    <!-- Bottom bar -->
+                    <div style="height:2px;background:${barColor};position:absolute;bottom:0;left:0;right:0"></div>
+                </div>`;
+            }).join('');
+        }
+
+        function renderWorkloadTable(entries) {
+            const el = document.getElementById('workload-table');
+            if (!el) return;
+            if (entries.length === 0) {
+                el.innerHTML = '<div class="p-6 mono text-xs text-center" style="color:var(--text-label-subtle)">No agents registered.</div>';
+                return;
+            }
+            el.innerHTML = entries.map(([id, a], i) => {
+                const chipClass = CHIP_CLASS[a.status] || 'chip-done';
+                const pending = a.pendingCount || 0;
+                const inProgress = a.inProgressCount || 0;
+                const completed = a.completedCount || 0;
+                const isSelected = selectedAgent === id;
+                return `
+                <div class="agent-row bb px-4 py-3 ${isSelected?'':''}${isSelected?'':''}" 
+                     style="display:grid;grid-template-columns:2rem 10rem 6rem 6rem 5rem 5rem 5rem 1fr;gap:.5rem;align-items:center;border-color:var(--border-primary);background:${isSelected?'#27272A':'transparent'}"
+                     onclick="openDetail('${id}', ${JSON.stringify(a).replace(/"/g,'&quot;')})">
+                    <span class="mono text-xs" style="color:var(--text-label-subtle)">${String(i+1).padStart(2,'0')}</span>
+                    <div>
+                        <div class="mono text-xs font-bold text-white" style="letter-spacing:.06em">${(a.name||id).toUpperCase()}</div>
+                        ${a.parent ? `<div class="label" style="color:var(--text-label)">↳ ${a.parent.toUpperCase()}</div>` : ''}
+                    </div>
+                    <span class="label" style="color:var(--text-muted)">${a.role||'—'}</span>
+                    <span class="chip ${chipClass}">${(a.status||'idle').toUpperCase()}</span>
+                    <span class="mono text-xs font-bold text-right" style="color:${pending>0?'#FF00FF':'#52525B'}">${pending}</span>
+                    <span class="mono text-xs font-bold text-right" style="color:${inProgress>0?'#0055FF':'#52525B'}">${inProgress}</span>
+                    <span class="mono text-xs font-bold text-right" style="color:var(--text-label)">${completed}</span>
+                    <span class="label" style="color:var(--text-label)">${(a.reportsTo||'eric').toUpperCase()}</span>
+                </div>`;
+            }).join('');
+        }
+
+        function openDetail(id, a) {
+            selectedAgent = id;
+            const panel = document.getElementById('detail-panel');
+            const content = document.getElementById('detail-content');
+            if (!panel || !content) return;
+            panel.classList.remove('hidden');
+            panel.classList.add('flex');
+
+            const isWorking = a.status === 'working' || a.status === 'in_progress';
+            const isBusy = a.status === 'busy';
+            const statusColor = isWorking ? '#0055FF' : isBusy ? '#FF8800' : '#52525B';
+            const pending = a.pendingCount || a.workload || 0;
+
+            content.innerHTML = `
+                <div style="background:var(--bg-secondary);padding:1rem;border:none">
+                    <div class="label mb-1" style="color:var(--text-label-subtle)">Agent ID</div>
+                    <div class="mono font-bold text-white text-lg">${(a.name||id).toUpperCase()}</div>
+                    <div class="label mt-0.5" style="color:var(--text-label)">${a.role||'—'}</div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--bg-tertiary)">
+                    <div style="background:var(--bg-secondary);padding:.75rem">
+                        <div class="label mb-1" style="color:var(--text-label-subtle)">Status</div>
+                        <div class="mono text-xs font-bold" style="color:${statusColor}">${(a.status||'idle').toUpperCase()}</div>
+                    </div>
+                    <div style="background:var(--bg-secondary);padding:.75rem">
+                        <div class="label mb-1" style="color:var(--text-label-subtle)">Pending</div>
+                        <div class="metric text-2xl text-white">${pending}</div>
+                    </div>
+                    <div style="background:var(--bg-secondary);padding:.75rem">
+                        <div class="label mb-1" style="color:var(--text-label-subtle)">Reports To</div>
+                        <div class="mono text-xs font-bold" style="color:var(--text-secondary)">${(a.reportsTo||'ERIC').toUpperCase()}</div>
+                    </div>
+                    <div style="background:var(--bg-secondary);padding:.75rem">
+                        <div class="label mb-1" style="color:var(--text-label-subtle)">Workload</div>
+                        <div class="mono text-xs font-bold" style="color:${statusColor}">${a.workload||0} / queue</div>
+                    </div>
+                </div>
+                <div class="flex flex-col gap-2 mt-1">
+                    <button onclick="openHandoffModalTo('${id}')" class="btn-takeover" style="width:100%;justify-content:center;padding:.625rem">SEND HANDOFF HERE</button>
+                    ${isWorking || isBusy ? `<button onclick="releaseAgent('${id}')" class="btn-danger" style="width:100%;justify-content:center;padding:.625rem">RELEASE AGENT</button>` : ''}
+                </div>
+                <div class="bt pt-3 mt-1" style="border-color:var(--border-primary)">
+                    <div class="label mb-2" style="color:var(--text-label-subtle)">Agent Class</div>
+                    <div class="mono text-xs" style="color:var(--text-muted)">${a.parent ? 'Sub-agent of ' + a.parent.toUpperCase() : 'Primary agent'}</div>
+                </div>
+                <div class="bt pt-3 mt-1" style="border-color:var(--border-primary)">
+                    <a href="/logs?agent=${id}" class="label hover:text-white transition-colors flex items-center gap-2" style="color:var(--text-label)">
+                        ≡ VIEW AGENT LOGS
+                    </a>
+                </div>
+            `;
+
+            // Re-render to show selection
+            if (Object.keys(agentData).length > 0) {
+                renderAll(agentData);
+            }
+        }
+
+        function closeDetail() {
+            selectedAgent = null;
+            const panel = document.getElementById('detail-panel');
+            if (panel) { panel.classList.add('hidden'); panel.classList.remove('flex'); }
+            if (Object.keys(agentData).length > 0) renderAll(agentData);
+        }
+
+        async function releaseAgent(agentId) {
+            if (!confirm('Release agent ' + agentId.toUpperCase() + ' from current task?')) return;
+            try {
+                await fetch('/api/agent/' + agentId + '/release', { method: 'POST' });
+                refresh();
+            } catch (e) { console.error('[AHM] Release failed:', e); }
+        }
+
+        // ── Modal ──
+        function openHandoffModal() { mobileShowModal("modal"); }
+
+        function openHandoffModalTo(agentId) {
+            document.getElementById('toAgent').value = agentId;
+            openHandoffModal();
+        }
+
+        function closeModal() { mobileHideModal("modal"); }
+
+        document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+        document.getElementById('modal').addEventListener('click', e => {
+            if (e.target === document.getElementById('modal')) closeModal();
+        });
+
+        async function createHandoff() {
+            const taskVal = document.getElementById('task').value.trim();
+            if (!taskVal) { alert('TASK DIRECTIVE REQUIRED'); return; }
+            const btn = document.getElementById('submit-btn');
+            const orig = btn.textContent;
+            btn.textContent = 'EXECUTING…';
+            btn.disabled = true;
+            try {
+                await fetch('/api/handoff', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        fromAgent: document.getElementById('fromAgent').value,
+                        toAgent: document.getElementById('toAgent').value,
+                        task: taskVal,
+                        context: document.getElementById('context').value,
+                        priority: document.getElementById('priority').value,
+                        client: document.getElementById('client').value || null
+                    })
+                });
+                document.getElementById('task').value = '';
+                document.getElementById('context').value = '';
+                document.getElementById('client').value = '';
+                closeModal();
+                refresh();
+            } catch (e) {
+                alert('EXECUTION FAILED — check console');
+            } finally {
+                btn.textContent = orig;
+                btn.disabled = false;
+            }
+        }
+
+        // ── Sidebar ──
+        document.getElementById('sidebar-toggle').addEventListener('click', () => {
+            document.getElementById('sidebar').classList.toggle('closed');
+        });
+
+        function setText(id, val) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = (val !== undefined && val !== null) ? val : '—';
+        }
+
+        // ── Bootstrap ──
+        refresh();
+        setInterval(() => { if (!document.hidden) refresh(); }, 8000);
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+    </script>    <button onclick="openHandoffModal()" class="fab" aria-label="Primary action">+</button>
+    <nav class="bottom-nav" id="mobile-bottom-nav">
+        <a href="/dashboard" class="bottom-nav-item ">
+            <span class="nav-icon">⊞</span><span>DASH</span>
+        </a>
+        <a href="/agents" class="bottom-nav-item active">
+            <span class="nav-icon">◈</span><span>AGENTS</span>
+        </a>
+        <a href="/office" class="bottom-nav-item ">
+            <span class="nav-icon">⌂</span><span>OFFICE</span>
+        </a>
+        <a href="/pipelines" class="bottom-nav-item ">
+            <span class="nav-icon">⇄</span><span>PIPES</span>
+        </a>
+        <a href="/crm" class="bottom-nav-item ">
+            <span class="nav-icon">▣</span><span>CRM</span>
+        </a>
+        <a href="/logs" class="bottom-nav-item ">
+            <span class="nav-icon">≡</span><span>LOGS</span>
+        </a>
+        <a href="/settings" class="bottom-nav-item ">
+            <span class="nav-icon">⚙</span><span>SETUP</span>
+        </a>
+    </nav>
+
+
+    <script id="mobile-v2-js">
+        /* ═══════════════════════════════════════════════════════════════
+           MOBILE v2 — SHEET MODAL FUNCTIONS
+           ═══════════════════════════════════════════════════════════════ */
+        function mobileShowModal(id) {
+            const m = document.getElementById(id || 'modal');
+            if (!m) return;
+            const box = m.querySelector('.modal-box');
+            m.style.display = 'flex';
+            m.classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => box?.classList.add('sheet-open'));
+            });
+        }
+        function mobileHideModal(id) {
+            const m = document.getElementById(id || 'modal');
+            if (!m) return;
+            const box = m.querySelector('.modal-box');
+            box?.classList.remove('sheet-open');
+            document.body.style.overflow = '';
+            setTimeout(() => {
+                m.classList.add('hidden');
+                m.style.display = '';
+            }, 350);
+        }
+        function mobileToggleDetailPanel(open) {
+            const p = document.getElementById('detail-panel');
+            if (!p) return;
+            if (open === undefined) open = !p.classList.contains('panel-open');
+            p.classList.toggle('panel-open', open);
+            if (window.innerWidth <= 1023) {
+                p.classList.toggle('hidden', !open);
+            }
+            document.body.style.overflow = (open && window.innerWidth <= 1023) ? 'hidden' : '';
+        }
+    </script>
+
+
+    <script>
+        // Forcefully remove sidebar on mobile to ensure it doesn't take up space
+        if (window.innerWidth < 1024) {
+            document.addEventListener('DOMContentLoaded', () => {
+                const sidebar = document.getElementById('sidebar');
+                if (sidebar) sidebar.style.display = 'none';
+                const main = document.querySelector('main');
+                if (main) main.style.marginLeft = '0';
+            });
+        }
+    </script>
+    
+    <!-- PWA Service Worker Registration -->
+    <script>
+      (function() {
+        if (!("serviceWorker" in navigator)) return;
+        window.addEventListener("load", function() {
+          navigator.serviceWorker.register("/sw.js", { scope: "/" })
+            .then(function(reg) {
+              reg.addEventListener("updatefound", function() {
+                var newWorker = reg.installing;
+                newWorker.addEventListener("statechange", function() {
+                  if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+                    var toast = document.createElement("div");
+                    toast.setAttribute("role", "alert");
+                    toast.setAttribute("aria-live", "polite");
+                    toast.style.cssText = [
+                      "position:fixed", "bottom:calc(64px + env(safe-area-inset-bottom) + 12px)",
+                      "left:50%", "transform:translateX(-50%)",
+                      "background:#18181B", "color:#fff", "border:1px solid #27272A",
+                      "box-shadow:4px 4px 0 #0055FF", "padding:10px 16px",
+                      "font-family:JetBrains Mono,monospace", "font-size:11px",
+                      "letter-spacing:.08em", "z-index:99999",
+                      "display:flex", "align-items:center", "gap:12px",
+                      "white-space:nowrap"
+                    ].join(";");
+                    toast.innerHTML = [
+                      '<span style="color:#0055FF">&#9672;</span> New version available',
+                      '<button onclick="window.location.reload()" style="background:#0055FF;color:#fff;border:none;padding:4px 10px;font-family:inherit;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;cursor:pointer">RELOAD</button>'
+                    ].join("");
+                    document.body.appendChild(toast);
+                    setTimeout(function() { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 8000);
+                  }
+                });
+              });
+            })
+            .catch(function(err) { console.warn("[AHM] SW registration failed:", err); });
+        });
+      })();
+    </script>
+    <script>tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','Helvetica Neue','sans-serif'],mono:['JetBrains Mono','monospace']},colors:{zinc:{950:'#09090B',900:'#18181B',800:'#27272A',700:'#3F3F46',600:'#52525B',500:'#71717A',400:'#A1A1AA',300:'#D4D4D8',200:'#E4E4E7',100:'#F4F4F5'},magenta:'#FF00FF',blue:{swiss:'#0055FF'}},borderRadius:{DEFAULT:'0px',sm:'0px',md:'0px',lg:'0px',xl:'0px','2xl':'0px',full:'9999px'}}}}};</script>
+    <script src="https://cdn.tailwindcss.com" defer></script>
+    <script src="js/global-nav.js"></script>
+</body>
+</html>

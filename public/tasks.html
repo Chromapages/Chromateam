@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; font-src 'self' https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; connect-src 'self' ws://localhost:* wss://localhost:* http://localhost:* https://localhost:*; img-src 'self' data:; media-src: *;">
+  <title>AHM — Tasks</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#080807">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;700&family=Syne:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/global-nav.css">
+
+  <style>
+    /* ═══════════════════════════════════════════════════
+       DESIGN LANGUAGE: "CONTROL ROOM" (Tasks Ext.)
+       Swiss International Style × Retro Terminal
+       ═══════════════════════════════════════════════════ */
+
+    :root {
+      /* Backgrounds */
+      --black:       #080807;
+      --surface-1:   #0F0F0D;
+      --surface-2:   #171714;
+      --surface-3:   #202019;
+      --rule:        #2C2C28;
+      --rule-thin:   #1A1A17;
+
+      /* Text */
+      --text-primary:   #EDE9DC;
+      --text-secondary: #7A7770;
+      --text-muted:     #3D3D38;
+
+      /* Accents */
+      --red:     #E11934;
+      --amber:   #D4860A;
+      --green:   #16A34A;
+      --blue:    #1D6FA4;
+      --purple:  #7C3AED;
+
+      /* Swiss spacing (8px base) */
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 24px;
+      --space-6: 32px;
+      --space-7: 48px;
+      --space-8: 64px;
+    }
+
+    [data-theme="light"] {
+      --black:       #F5F2EB;
+      --surface-1:   #EEEBE3;
+      --surface-2:   #E5E2DA;
+      --surface-3:   #DBD8D0;
+      --rule:        #C5C2BA;
+      --rule-thin:   #D5D2CA;
+      --text-primary:   #1A1916;
+      --text-secondary: #4A4845;
+      --text-muted:     #7A7770;
+    }
+
+    /* ── RESET ── */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      background: var(--black);
+      color: var(--text-primary);
+      font-family: 'Syne', sans-serif;
+      min-height: 100vh;
+      overscroll-behavior-y: contain;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      padding-bottom: 72px; /* bottom nav clearance */
+    }
+
+    @media (min-width: 1024px) {
+      body { padding-bottom: 0; }
+    }
+
+    /* ── TYPOGRAPHY ── */
+    .font-display  { font-family: 'Bebas Neue', sans-serif; letter-spacing: 0.04em; }
+    .font-mono     { font-family: 'IBM Plex Mono', monospace; }
+    .font-body     { font-family: 'Syne', sans-serif; }
+    .label-caps    { font-family: 'Syne', sans-serif; font-size: 9px; font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase; color: var(--text-muted); }
+
+    /* ── HEADER OVERRIDE ── */
+    .ahm-header {
+      height: 3rem;
+      border-bottom: 1px solid var(--rule);
+      background: var(--black);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 1rem;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .ahm-header h1 {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 1.5rem;
+      letter-spacing: 0.04em;
+      color: var(--text-primary);
+      margin: 0;
+    }
+
+    .ahm-header .client-filter {
+      background: var(--surface-2);
+      border: 1px solid var(--rule);
+      color: var(--text-primary);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-left: auto;
+      margin-right: 12px;
+    }
+
+    /* ── BOARD LAYOUT ── */
+    .board {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 1px;
+      background: var(--rule);
+      min-height: calc(100vh - 8rem);
+      overflow-x: hidden;
+    }
+
+    @media (max-width: 1023px) {
+      .board {
+        grid-template-columns: 1fr;
+        gap: var(--space-4);
+        padding: var(--space-4);
+        background: var(--black);
+      }
+    }
+
+    @media (min-width: 1024px) {
+      .board {
+        display: flex;
+        overflow-x: auto;
+        padding: 0;
+        gap: 0;
+      }
+    }
+
+    .column {
+      background: var(--black);
+      display: flex;
+      flex-direction: column;
+      min-width: 320px;
+      border-right: 1px solid var(--rule);
+    }
+
+    @media (max-width: 1023px) {
+      .column {
+        min-width: 0;
+        border: 1px solid var(--rule);
+        border-radius: 4px;
+        background: var(--surface-1);
+      }
+    }
+
+    .column-header {
+      padding: 0.75rem 1rem;
+      background: var(--surface-1);
+      border-bottom: 1px solid var(--rule);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+    }
+
+    .column-title-group {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+    }
+
+    .column-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 0;
+    }
+
+    .column-title {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-secondary);
+    }
+
+    .column-count {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      color: var(--text-muted);
+      background: var(--surface-2);
+      padding: 2px 6px;
+      border: 1px solid var(--rule);
+    }
+
+    .column-tasks {
+      flex: 1;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      min-height: 100px;
+      transition: all 0.3s ease;
+    }
+
+    @media (max-width: 1023px) {
+      .column-tasks.collapsed {
+        display: none;
+      }
+      .column-header .toggle-icon::after {
+        content: '▼';
+        font-size: 10px;
+        color: var(--text-muted);
+      }
+      .column-header.collapsed .toggle-icon::after {
+        content: '▶';
+      }
+    }
+
+    .column-tasks.drag-over {
+      background: var(--surface-3);
+    }
+
+    .task {
+      background: var(--surface-2);
+      border: 1px solid var(--rule);
+      padding: 1rem;
+      cursor: grab;
+      position: relative;
+      transition: all 0.1s ease;
+    }
+
+    .task:hover {
+      border-color: var(--text-muted);
+      background: var(--surface-3);
+    }
+
+    .task.dragging {
+      opacity: 0.5;
+    }
+
+    .task-header {
+      margin-bottom: 0.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+
+    .task-client-badge {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 8px;
+      font-weight: 600;
+      color: var(--purple);
+      background: var(--purple-bg);
+      border: 1px solid var(--purple);
+      padding: 2px 4px;
+      border-radius: 2px;
+      margin-right: 4px;
+    }
+
+    .task-title {
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      line-height: 1.4;
+    }
+
+    .task-priority {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9px;
+      font-weight: 700;
+      padding: 2px 6px;
+      text-transform: uppercase;
+    }
+
+    .task-priority.urgent { background: var(--red); color: white; }
+    .task-priority.high { color: var(--amber); border: 1px solid var(--amber); }
+    .task-priority.medium { color: var(--blue); border: 1px solid var(--blue); }
+    .task-priority.low { color: var(--text-muted); border: 1px solid var(--rule); }
+
+    .task-meta {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-top: 0.75rem;
+    }
+
+    .task-owner {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+
+    .task-owner-avatar {
+      width: 20px;
+      height: 20px;
+      background: var(--surface-3);
+      border: 1px solid var(--rule);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9px;
+      font-weight: 700;
+    }
+
+    /* ── BUTTONS ── */
+    .btn {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 6px 12px;
+      border: 1px solid var(--rule);
+      cursor: pointer;
+      transition: all 0.1s ease;
+      background: var(--surface-2);
+      color: var(--text-secondary);
+      border-radius: 0;
+    }
+
+    .btn:hover {
+      background: var(--surface-3);
+      color: var(--text-primary);
+      border-color: var(--text-muted);
+    }
+
+    .btn-primary {
+      background: var(--text-primary);
+      color: var(--black);
+      border: none;
+    }
+
+    .btn-primary:hover {
+      background: white;
+    }
+
+    .btn-square {
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+
+    /* Modal Overlay Fixes */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      backdrop-filter: blur(4px);
+      z-index: 1000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      transition: opacity 0.2s ease;
+    }
+
+    .modal-overlay.active { display: flex; opacity: 1; visibility: visible; }
+
+    .modal {
+      background: var(--black);
+      border: 1px solid var(--rule);
+      width: 100%;
+      max-width: 500px;
+      max-height: 90vh;
+      overflow-y: auto;
+      border-radius: 0;
+      transform: none;
+    }
+    .modal-overlay.active .modal {
+      transform: translateY(0);
+    }
+
+    .modal-header {
+      padding: var(--space-4) var(--space-5);
+      border-bottom: 1px solid var(--rule);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .modal-header h2 {
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .modal-close {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: var(--space-2);
+      font-size: 20px;
+      line-height: 1;
+    }
+
+    .modal-close:hover { color: var(--text-primary); }
+
+    .modal-body {
+      padding: var(--space-5);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-4);
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-2);
+    }
+
+    .form-label {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-secondary);
+    }
+
+    .form-input, .form-select, .form-textarea {
+      background: var(--surface-2);
+      border: 1px solid var(--rule);
+      border-radius: 4px;
+      padding: var(--space-3);
+      color: var(--text-primary);
+      font-family: 'Syne', sans-serif;
+      font-size: 14px;
+      width: 100%;
+    }
+
+    .form-input:focus, .form-select:focus, .form-textarea:focus {
+      outline: none;
+      border-color: var(--text-secondary);
+    }
+
+    .form-textarea {
+      min-height: 80px;
+      resize: vertical;
+    }
+
+    .modal-actions {
+      padding: var(--space-4) var(--space-5);
+      border-top: 1px solid var(--rule);
+      display: flex;
+      gap: var(--space-3);
+      justify-content: flex-end;
+    }
+
+    .blockers-list {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-2);
+    }
+
+    .blocker-item {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      background: var(--red-bg);
+      border-radius: 4px;
+      padding: var(--space-2) var(--space-3);
+      font-size: 13px;
+    }
+
+    .blocker-item button {
+      background: none;
+      border: none;
+      color: var(--red);
+      cursor: pointer;
+      margin-left: auto;
+      font-size: 16px;
+      line-height: 1;
+    }
+
+    .blocker-item button:hover { color: var(--text-primary); }
+
+    .empty-state {
+      text-align: center;
+      padding: var(--space-8) var(--space-4);
+      color: var(--text-muted);
+    }
+
+    .empty-state p {
+      font-size: 13px;
+    }
+
+    .task-actions {
+      display: flex;
+      gap: var(--space-2);
+      margin-top: var(--space-3);
+      padding-top: var(--space-3);
+      border-top: 1px solid var(--rule-thin);
+    }
+
+    .task-actions button {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 12px;
+      padding: var(--space-1) var(--space-2);
+    }
+
+    .task-actions button:hover { color: var(--text-primary); }
+    .task-actions button.delete:hover { color: var(--red); }
+  </style>
+</head>
+<body>
+  <div class="ahm-header">
+    <button id="ahm-nav-toggle" aria-label="Open navigation">☰</button>
+    <h1>COMMAND CENTER // TASKS</h1>
+    <select id="clientFilter" class="client-filter" onchange="loadData()" aria-label="Filter by client">
+      <option value="">All Clients</option>
+      <option value="unt">UNT</option>
+      <option value="buddhas">Buddha's</option>
+      <option value="chromapages">Chromapages</option>
+    </select>
+    <button class="btn btn-primary btn-square" onclick="openModal()" title="NEW_TASK">+</button>
+  </div>
+
+  <div class="board" id="board">
+    <!-- Columns rendered by JS -->
+  </div>
+
+  <!-- Modal -->
+  <div class="modal-overlay" id="modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="modalTitle">New Task</h2>
+        <button class="modal-close" onclick="closeModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Title</label>
+          <input type="text" class="form-input" id="taskTitle" placeholder="Task title">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Description</label>
+          <textarea class="form-textarea" id="taskDescription" placeholder="Task description"></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Priority</label>
+          <select class="form-select" id="taskPriority">
+            <option value="low">Low</option>
+            <option value="medium" selected>Medium</option>
+            <option value="high">High</option>
+            <option value="urgent">Urgent</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Owner</label>
+          <select class="form-select" id="taskOwner">
+            <option value="unassigned">Unassigned</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Client</label>
+          <select class="form-select" id="taskClient">
+            <option value="">No client</option>
+            <option value="unt">UNT</option>
+            <option value="buddhas">Buddha's</option>
+            <option value="chromapages">Chromapages</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Done Criteria</label>
+          <textarea class="form-textarea" id="taskDoneCriteria" placeholder="What needs to be done to mark this task complete?"></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Critic Pre-Mortem</label>
+          <textarea class="form-textarea" id="taskCriticChecklist" placeholder="What could break? What are we missing? What assumption is risky?"></textarea>
+        </div>
+        <div class="form-group" style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" id="taskCriticReviewed">
+          <label class="form-label" style="margin:0;">Critic reviewed</label>
+        </div>
+        <div class="form-group" id="blockersGroup" style="display:none;">
+          <label class="form-label">Blockers</label>
+          <div class="blockers-list" id="blockersList"></div>
+          <div style="display:flex;gap:var(--space-2);margin-top:var(--space-2);">
+            <input type="text" class="form-input" id="newBlocker" placeholder="Add a blocker...">
+            <button class="btn btn-ghost" onclick="addBlocker()">Add</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveTask()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/global-nav.js"></script>
+  <script>
+    let tasks = [];
+    let columns = [];
+    let priorities = [];
+    let owners = [];
+    let editingTaskId = null;
+    let currentBlockers = [];
+
+    async function loadData() {
+      try {
+        const clientFilter = document.getElementById('clientFilter')?.value || '';
+        const clientParam = clientFilter ? `?client=${clientFilter}` : '';
+        const res = await fetch(`/api/tasks${clientParam}`);
+        const data = await res.json();
+        tasks = data.tasks || [];
+        columns = data.columns || [];
+        priorities = data.priorities || [];
+        owners = data.owners || [];
+        renderBoard();
+        populateOwnerSelect();
+      } catch (e) {
+        console.error('Failed to load tasks:', e);
+      }
+    }
+
+    function renderBoard() {
+      const board = document.getElementById('board');
+      board.innerHTML = columns.map(col => {
+        const colTasks = tasks.filter(t => t.column === col.id);
+        return `
+          <div class="column" id="col-${col.id}">
+            <div class="column-header" onclick="toggleColumn('${col.id}')">
+              <div class="column-title-group">
+                <div class="column-dot" style="background:${col.color}"></div>
+                <span class="column-title">${col.label}</span>
+                <span class="column-count">${colTasks.length}</span>
+              </div>
+              <div class="toggle-icon"></div>
+            </div>
+            <div class="column-tasks" id="tasks-${col.id}" data-column="${col.id}"
+                 ondragover="handleDragOver(event)" 
+                 ondrop="handleDrop(event)"
+                 ondragleave="handleDragLeave(event)">
+              ${colTasks.length === 0 ? '<div class="empty-state"><p>NO_TASKS</p></div>' : 
+                colTasks.map(task => renderTask(task)).join('')}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function toggleColumn(id) {
+      if (window.innerWidth >= 1024) return;
+      const tasksEl = document.getElementById(`tasks-${id}`);
+      const headerEl = document.querySelector(`#col-${id} .column-header`);
+      tasksEl.classList.toggle('collapsed');
+      headerEl.classList.toggle('collapsed');
+    }
+
+    function renderTask(task) {
+      const priority = priorities.find(p => p.id === task.priority) || {label: 'MEDIUM', id: 'medium'};
+      const owner = owners.find(o => o.id === task.owner) || {label: 'UNASSIGNED'};
+      const ownerInitials = owner.label.split(' ').map(n => n[0]).join('').toUpperCase().slice(0,2);
+      const clientBadge = task.client ? `<span class="task-client-badge">${escapeHtml(task.client.toUpperCase())}</span>` : '';
+      
+      return `
+        <div class="task" draggable="true" data-id="${task.id}"
+             ondragstart="handleDragStart(event)"
+             ondragend="handleDragEnd(event)"
+             onclick="editTask('${task.id}')">
+          <div class="task-header">
+            ${clientBadge}
+            <span class="task-title">${escapeHtml(task.title).toUpperCase()}</span>
+            <span class="task-priority ${priority.id}">${priority.label}</span>
+          </div>
+          <div class="task-meta">
+            <div class="task-owner">
+              <div class="task-owner-avatar">${ownerInitials}</div>
+              <span class="font-mono" style="font-size: 9px; letter-spacing: 0.05em;">${escapeHtml(owner.label).toUpperCase()}</span>
+            </div>
+            ${task.criticReviewed ? `
+              <div class="task-blocker" style="margin-left: auto; display: flex; align-items: center; gap: 4px; color: var(--purple); font-size: 9px; font-weight: 700; font-family: 'IBM Plex Mono';">
+                <div style="width: 4px; height: 4px; background: var(--purple);"></div>
+                <span>CRITIC</span>
+              </div>
+            ` : ''}
+            ${task.blockers && task.blockers.length > 0 ? `
+              <div class="task-blocker" style="margin-left: auto; display: flex; align-items: center; gap: 4px; color: var(--red); font-size: 9px; font-weight: 700; font-family: 'IBM Plex Mono';">
+                <div style="width: 4px; height: 4px; background: var(--red);"></div>
+                <span>${task.blockers.length} BLKR</span>
+              </div>
+            ` : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    function populateOwnerSelect() {
+      const select = document.getElementById('taskOwner');
+      select.innerHTML = owners.map(o => `<option value="${o.id}">${o.label}</option>`).join('');
+    }
+
+    let draggedTaskId = null;
+
+    function handleDragStart(e) {
+      draggedTaskId = e.target.dataset.id;
+      e.target.classList.add('dragging');
+    }
+
+    function handleDragEnd(e) {
+      e.target.classList.remove('dragging');
+      document.querySelectorAll('.column-tasks').forEach(el => el.classList.remove('drag-over'));
+    }
+
+    function handleDragOver(e) {
+      e.preventDefault();
+      e.currentTarget.classList.add('drag-over');
+    }
+
+    function handleDragLeave(e) {
+      e.currentTarget.classList.remove('drag-over');
+    }
+
+    function handleDrop(e) {
+      e.preventDefault();
+      const columnId = e.currentTarget.dataset.column;
+      const target = e.currentTarget;
+      target.classList.remove('drag-over');
+      
+      if (draggedTaskId && columnId) {
+        moveTask(draggedTaskId, columnId);
+      }
+      draggedTaskId = null;
+    }
+
+    async function moveTask(taskId, newColumn) {
+      try {
+        await fetch(`/api/tasks/${taskId}/move`, {
+          method: 'PUT',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ column: newColumn })
+        });
+        const task = tasks.find(t => t.id === taskId);
+        if (task) task.column = newColumn;
+        renderBoard();
+      } catch (e) {
+        console.error('Failed to move task:', e);
+      }
+    }
+
+    function openModal(task = null) {
+      editingTaskId = task ? task.id : null;
+      currentBlockers = task ? [...(task.blockers || [])] : [];
+      document.getElementById('modalTitle').textContent = task ? 'Edit Task' : 'New Task';
+      document.getElementById('taskTitle').value = task ? task.title : '';
+      document.getElementById('taskDescription').value = task ? task.description || '' : '';
+      document.getElementById('taskPriority').value = task ? task.priority : 'medium';
+      document.getElementById('taskOwner').value = task ? task.owner : 'unassigned';
+      document.getElementById('taskClient').value = task ? task.client || '' : '';
+      document.getElementById('taskDoneCriteria').value = task ? task.doneCriteria || '' : '';
+      document.getElementById('taskCriticChecklist').value = task ? task.critorChecklist || '' : '';
+      document.getElementById('taskCriticReviewed').checked = task ? !!task.criticReviewed : false;
+      document.getElementById('blockersGroup').style.display = task ? 'block' : 'none';
+      renderBlockers();
+      document.getElementById('modal').classList.add('active');
+    }
+
+    function closeModal() {
+      document.getElementById('modal').classList.remove('active');
+      editingTaskId = null;
+      currentBlockers = [];
+    }
+
+    function editTask(taskId) {
+      const task = tasks.find(t => t.id === taskId);
+      if (task) openModal(task);
+    }
+
+    function renderBlockers() {
+      const list = document.getElementById('blockersList');
+      list.innerHTML = currentBlockers.map((b, i) => `
+        <div class="blocker-item">
+          <span>${escapeHtml(b.text)}</span>
+          <button onclick="removeBlocker(${i})">×</button>
+        </div>
+      `).join('');
+    }
+
+    function addBlocker() {
+      const input = document.getElementById('newBlocker');
+      const text = input.value.trim();
+      if (text) {
+        currentBlockers.push({ id: Date.now().toString(), text });
+        input.value = '';
+        renderBlockers();
+      }
+    }
+
+    function removeBlocker(index) {
+      currentBlockers.splice(index, 1);
+      renderBlockers();
+    }
+
+    async function saveTask() {
+      const title = document.getElementById('taskTitle').value.trim();
+      if (!title) return;
+
+      const taskData = {
+        title,
+        description: document.getElementById('taskDescription').value.trim(),
+        priority: document.getElementById('taskPriority').value,
+        owner: document.getElementById('taskOwner').value,
+        client: document.getElementById('taskClient').value || null,
+        doneCriteria: document.getElementById('taskDoneCriteria').value.trim(),
+        criticChecklist: document.getElementById('taskCriticChecklist').value.trim(),
+        criticReviewed: document.getElementById('taskCriticReviewed').checked,
+        blockers: currentBlockers
+      };
+
+      try {
+        if (editingTaskId) {
+          await fetch(`/api/tasks/${editingTaskId}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(taskData)
+          });
+          const idx = tasks.findIndex(t => t.id === editingTaskId);
+          if (idx !== -1) tasks[idx] = {...tasks[idx], ...taskData};
+        } else {
+          const res = await fetch('/api/tasks', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(taskData)
+          });
+          const newTask = await res.json();
+          tasks.push(newTask.task);
+        }
+        renderBoard();
+        closeModal();
+      } catch (e) {
+        console.error('Failed to save task:', e);
+      }
+    }
+
+    async function deleteTask(taskId) {
+      if (!confirm('Delete this task?')) return;
+      try {
+        await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' });
+        tasks = tasks.filter(t => t.id !== taskId);
+        renderBoard();
+      } catch (e) {
+        console.error('Failed to delete task:', e);
+      }
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    loadData();
+  </script>
+</body>
+</html>

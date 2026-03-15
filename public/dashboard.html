@@ -1,0 +1,1907 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; font-src 'self' https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; connect-src 'self' ws://localhost:* wss://localhost:* http://localhost:* https://localhost:*; img-src 'self' data:; media-src: *;">
+  <title>AHM — Command Center</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#080807">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;700&family=Syne:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/global-nav.css">
+
+  <style>
+    /* ═══════════════════════════════════════════════════
+       DESIGN LANGUAGE: "CONTROL ROOM"
+       Swiss International Style × Retro Terminal
+       ═══════════════════════════════════════════════════ */
+
+    :root {
+      /* Backgrounds */
+      --black:       #080807;
+      --surface-1:   #0F0F0D;
+      --surface-2:   #171714;
+      --surface-3:   #202019;
+      --rule:        #2C2C28;
+      --rule-thin:   #1A1A17;
+
+      /* Text */
+      --text-primary:   #EDE9DC;
+      --text-secondary: #7A7770;
+      --text-muted:     #3D3D38;
+
+      /* Accents */
+      --red:     #E11934;
+      --amber:   #D4860A;
+      --green:   #16A34A;
+      --blue:    #1D6FA4;
+      --purple:  #7C3AED;
+
+      /* Tinted backgrounds */
+      --red-bg:    rgba(225,25,52,0.10);
+      --amber-bg:  rgba(212,134,10,0.10);
+      --green-bg:  rgba(22,163,74,0.10);
+      --blue-bg:   rgba(29,111,164,0.10);
+      --purple-bg: rgba(124,58,237,0.10);
+
+      /* Swiss spacing (8px base) */
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 24px;
+      --space-6: 32px;
+      --space-7: 48px;
+      --space-8: 64px;
+    }
+
+    [data-theme="light"] {
+      --black:       #F5F2EB;
+      --surface-1:   #EEEBE3;
+      --surface-2:   #E5E2DA;
+      --surface-3:   #DBD8D0;
+      --rule:        #C5C2BA;
+      --rule-thin:   #D5D2CA;
+      --text-primary:   #1A1916;
+      --text-secondary: #4A4845;
+      --text-muted:     #7A7770;
+    }
+
+    /* ── RESET ── */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      background: var(--black);
+      color: var(--text-primary);
+      font-family: 'Syne', sans-serif;
+      min-height: 100vh;
+      overscroll-behavior-y: contain;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      padding-bottom: 72px; /* bottom nav clearance */
+    }
+
+    @media (min-width: 769px) {
+      body { padding-bottom: 0; }
+    }
+
+    /* ── TYPOGRAPHY ── */
+    .font-display  { font-family: 'Bebas Neue', sans-serif; letter-spacing: 0.04em; }
+    .font-mono     { font-family: 'IBM Plex Mono', monospace; }
+    .font-body     { font-family: 'Syne', sans-serif; }
+    .label-caps    { font-family: 'Syne', sans-serif; font-size: 9px; font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase; color: var(--text-muted); }
+
+    /* ── SWISS ACCENT BAR (top) ── */
+    .swiss-bar {
+      height: 3px;
+      background: var(--red);
+      width: 100%;
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: 200;
+    }
+
+    /* ── HEADER (handled by global-nav.js/css) ── */
+    #sidebar-toggle { display: none !important; }
+
+    .site-logo span {
+      color: var(--red);
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+    }
+
+    /* Connection indicator */
+    .conn-badge {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9px;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      text-transform: uppercase;
+    }
+
+    .conn-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      flex-shrink: 0;
+    }
+
+    .conn-dot.live {
+      background: var(--green);
+      animation: status-pulse 2s ease-in-out infinite;
+    }
+
+    .conn-dot.dead { background: var(--red); }
+
+    /* Theme toggle */
+    .theme-btn {
+      width: 32px;
+      height: 32px;
+      background: var(--surface-2);
+      border: 1px solid var(--rule);
+      border-radius: 0;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-secondary);
+      transition: background 150ms ease, color 150ms ease;
+      flex-shrink: 0;
+    }
+
+    .theme-btn:hover { background: var(--surface-3); color: var(--text-primary); }
+
+    /* ── COMMAND BAR ── */
+    .command-zone {
+      position: sticky;
+      top: 51px;
+      z-index: 140;
+      background: var(--black);
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .command-inner {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .command-cursor {
+      position: absolute;
+      left: 14px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 13px;
+      color: var(--red);
+      animation: blink 1s step-start infinite;
+      pointer-events: none;
+      z-index: 1;
+      line-height: 1;
+    }
+
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .command-input {
+      width: 100%;
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid var(--rule-thin);
+      padding: 14px 80px 14px 30px;
+      color: var(--text-primary);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 13px;
+      outline: none;
+      caret-color: var(--red);
+    }
+
+    .command-input::placeholder { color: var(--text-muted); }
+    .command-input:focus { border-bottom-color: var(--red); }
+
+    .command-exec-btn {
+      position: absolute;
+      right: 0;
+      top: 0;
+      bottom: 0;
+      padding: 0 var(--space-4);
+      background: transparent;
+      border: none;
+      border-left: 1px solid var(--rule);
+      cursor: pointer;
+      font-family: 'Syne', sans-serif;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      transition: color 150ms ease, background 150ms ease;
+      white-space: nowrap;
+    }
+
+    .command-exec-btn:hover { color: var(--text-primary); background: var(--surface-2); }
+
+    .suggestions {
+      display: none;
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: var(--surface-2);
+      border: 1px solid var(--rule);
+      border-top: none;
+      z-index: 200;
+    }
+
+    .suggestions.show { display: block; }
+
+    .suggestion-item {
+      padding: var(--space-2) var(--space-4);
+      cursor: pointer;
+      border-bottom: 1px solid var(--rule-thin);
+      font-family: 'IBM Plex Mono', monospace;      /* Injection target for global navigation script */
+      font-size: 11px;
+      color: var(--text-secondary);
+      transition: background 100ms ease;
+    }
+
+    .suggestion-item:hover { background: var(--surface-3); color: var(--text-primary); }
+    .suggestion-item code { color: var(--red); }
+
+    /* ── PAGE CONTENT ── */
+    .page-content {
+      padding: var(--space-4);
+      max-width: 1440px;
+      margin: 0 auto;
+    }
+
+    @media (min-width: 769px) {
+      .page-content { padding: var(--space-5); }
+    }
+
+    /* ── SECTION HEADER ── */
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      margin-bottom: var(--space-4);
+    }
+
+    .client-filter {
+      margin-left: auto;
+      background: var(--surface-2);
+      border: 1px solid var(--rule);
+      color: var(--text-primary);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      outline: none;
+    }
+
+    .client-filter:hover {
+      border-color: var(--text-muted);
+    }
+
+    .client-filter:focus {
+      border-color: var(--blue);
+    }
+
+    .section-title {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 14px;
+      letter-spacing: 0.1em;
+      color: var(--text-secondary);
+      white-space: nowrap;
+    }
+
+    .section-rule {
+      flex: 1;
+      height: 1px;
+      background: var(--rule);
+    }
+
+    .section-action {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      color: var(--text-muted);
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: var(--space-1) var(--space-2);
+      transition: color 150ms ease;
+      min-height: 32px;
+      letter-spacing: 0.05em;
+    }
+
+    .section-action:hover { color: var(--text-secondary); }
+
+    .section-spacer { margin-bottom: var(--space-5); }
+
+    /* ── METRICS GRID ── */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      background: var(--rule);
+      border: 1px solid var(--rule);
+      margin-bottom: var(--space-5);
+    }
+
+    @media (min-width: 769px) {
+      .metrics-grid { grid-template-columns: repeat(6, 1fr); }
+    }
+
+    .metric-card {
+      background: var(--surface-1);
+      padding: var(--space-3);
+      position: relative;
+      cursor: default;
+      transition: background 200ms ease;
+    }
+
+    .metric-card:hover { background: var(--surface-2); }
+
+    .metric-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 3px;
+      height: 100%;
+      background: transparent;
+    }
+
+    .metric-card.mc-pending::before  { background: var(--amber); }
+    .metric-card.mc-failed::before   { background: var(--red); }
+    .metric-card.mc-active::before   { background: var(--blue); }
+    .metric-card.mc-done::before     { background: var(--green); }
+
+    .metric-label {
+      font-family: 'Syne', sans-serif;
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: var(--space-2);
+    }
+
+    .metric-value {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 28px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    @media (min-width: 769px) {
+      .metric-value { font-size: 36px; }
+    }
+
+    .mv-total  { color: var(--blue);   text-shadow: 0 0 24px rgba(29,111,164,0.35); }
+    .mv-pend   { color: var(--amber);  text-shadow: 0 0 24px rgba(212,134,10,0.35); }
+    .mv-active { color: var(--blue);   text-shadow: 0 0 24px rgba(29,111,164,0.35); animation: metric-pulse 2s ease-in-out infinite; }
+    .mv-done   { color: var(--green);  text-shadow: 0 0 24px rgba(22,163,74,0.35); }
+    .mv-fail   { color: var(--red);    text-shadow: 0 0 24px rgba(225,25,52,0.35); }
+    .mv-health { color: var(--text-primary); text-shadow: 0 0 24px rgba(237,233,220,0.2); }
+
+    @keyframes metric-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
+    /* ── MAIN GRID (desktop 2-col) ── */
+    @media (min-width: 769px) {
+      .main-grid {
+        display: grid;
+        grid-template-columns: 1fr 340px;
+        gap: var(--space-5);
+        align-items: start;
+      }
+    }
+
+    /* ── AGENTS GRID ── */
+    .agents-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1px;
+      background: var(--rule);
+      border: 1px solid var(--rule);
+    }
+
+    @media (min-width: 1024px) {
+      .agents-grid { grid-template-columns: repeat(6, 1fr); }
+    }
+
+    .agent-chip {
+      background: var(--surface-1);
+      padding: var(--space-2) var(--space-3);
+      cursor: pointer;
+      transition: background 150ms ease;
+      min-height: 64px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 3px;
+    }
+
+    .agent-chip:hover { background: var(--surface-2); }
+
+    .agent-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      display: inline-block;
+      margin-right: 4px;
+      flex-shrink: 0;
+    }
+
+    .agent-name {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      display: flex;
+      align-items: center;
+    }
+
+    .agent-score {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .agent-status-label {
+      font-family: 'Syne', sans-serif;
+      font-size: 8px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .agent-healthy .agent-dot  { background: var(--green); }
+    .agent-healthy .agent-score { color: var(--green); text-shadow: 0 0 16px rgba(22,163,74,0.3); }
+    .agent-healthy .agent-status-label { color: var(--green); }
+
+    .agent-stale .agent-dot   { background: var(--amber); animation: status-pulse 2s ease-in-out infinite; }
+    .agent-stale .agent-score { color: var(--amber); text-shadow: 0 0 16px rgba(212,134,10,0.3); }
+    .agent-stale .agent-status-label { color: var(--amber); }
+
+    .agent-critical .agent-dot   { background: var(--red); animation: status-pulse 1s ease-in-out infinite; }
+    .agent-critical .agent-score { color: var(--red); text-shadow: 0 0 16px rgba(225,25,52,0.3); }
+    .agent-critical .agent-status-label { color: var(--red); }
+
+    .agent-idle .agent-dot   { background: var(--text-muted); }
+    .agent-idle .agent-score { color: var(--text-secondary); }
+    .agent-idle .agent-status-label { color: var(--text-muted); }
+
+    @keyframes status-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(1.4); }
+    }
+
+    /* ── LIVE FEED ── */
+    .live-feed {
+      border: 1px solid var(--rule);
+    }
+
+    .feed-list {
+      max-height: 200px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--rule) transparent;
+    }
+
+    @media (min-width: 769px) {
+      .feed-list { max-height: 280px; }
+    }
+
+    .feed-item {
+      display: flex;
+      align-items: baseline;
+      gap: var(--space-2);
+      padding: 7px var(--space-3);
+      border-bottom: 1px solid var(--rule-thin);
+      border-left: 2px solid transparent;
+      animation: feed-slide 250ms ease-out;
+    }
+
+    @keyframes feed-slide {
+      from { transform: translateX(-6px); opacity: 0; }
+      to   { transform: translateX(0);   opacity: 1; }
+    }
+
+    .feed-item.fi-created   { border-left-color: var(--blue); }
+    .feed-item.fi-started   { border-left-color: var(--amber); }
+    .feed-item.fi-completed { border-left-color: var(--green); }
+    .feed-item.fi-failed    { border-left-color: var(--red); }
+    .feed-item.fi-decision  { border-left-color: var(--purple); }
+    .feed-item.fi-system    { border-left-color: var(--rule); }
+
+    .feed-time {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .feed-msg {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      color: var(--text-secondary);
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .feed-empty {
+      padding: var(--space-5) var(--space-4);
+      text-align: center;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    /* ── HANDOFFS LIST ── */
+    .handoffs-list {
+      border: 1px solid var(--rule);
+    }
+
+    .handoff-row {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      padding: var(--space-3) var(--space-3);
+      border-bottom: 1px solid var(--rule-thin);
+      border-left: 3px solid transparent;
+      min-height: 52px;
+      cursor: pointer;
+      transition: background 150ms ease;
+    }
+
+    .handoff-row:last-child { border-bottom: none; }
+    .handoff-row:hover { background: var(--surface-2); }
+
+    .handoff-row.hr-pending     { border-left-color: var(--amber); }
+    .handoff-row.hr-in_progress { border-left-color: var(--blue); }
+    .handoff-row.hr-completed   { border-left-color: var(--green); }
+    .handoff-row.hr-failed      { border-left-color: var(--red); }
+
+    .hr-status-badge {
+      font-family: 'Syne', sans-serif;
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 2px 5px;
+      border: 1px solid;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .hr-pending .hr-status-badge     { color: var(--amber); border-color: var(--amber); background: var(--amber-bg); }
+    .hr-in_progress .hr-status-badge { color: var(--blue);  border-color: var(--blue);  background: var(--blue-bg); }
+    .hr-completed .hr-status-badge   { color: var(--green); border-color: var(--green); background: var(--green-bg); }
+    .hr-failed .hr-status-badge      { color: var(--red);   border-color: var(--red);   background: var(--red-bg); }
+
+    .hr-client-badge {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9px;
+      font-weight: 500;
+      color: var(--purple);
+      background: var(--purple-bg);
+      border: 1px solid var(--purple);
+      padding: 2px 6px;
+      border-radius: 3px;
+      margin-right: 8px;
+      flex-shrink: 0;
+    }
+
+    .hr-agents {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .hr-task {
+      font-family: 'Syne', sans-serif;
+      font-size: 11px;
+      color: var(--text-muted);
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .hr-time {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    /* ── DECISIONS TAB ── */
+    .form-field {
+      width: 100%;
+      background: var(--surface-2);
+      border: 1px solid var(--rule);
+      border-radius: 0;
+      padding: var(--space-3) var(--space-4);
+      color: var(--text-primary);
+      font-family: 'Syne', sans-serif;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 150ms ease;
+      resize: vertical;
+    }
+
+    .form-field:focus { border-color: var(--red); }
+    .form-field::placeholder { color: var(--text-muted); }
+
+    .form-row {
+      display: flex;
+      gap: 1px;
+      background: var(--rule);
+      border: 1px solid var(--rule);
+      margin-top: 1px;
+    }
+
+    .form-input-reason {
+      flex: 1;
+      background: var(--surface-2);
+      border: none;
+      padding: var(--space-3) var(--space-4);
+      color: var(--text-primary);
+      font-family: 'Syne', sans-serif;
+      font-size: 13px;
+      outline: none;
+    }
+
+    .form-input-reason:focus { background: var(--surface-3); }
+    .form-input-reason::placeholder { color: var(--text-muted); }
+
+    .form-submit {
+      padding: var(--space-3) var(--space-5);
+      background: var(--red);
+      border: none;
+      cursor: pointer;
+      font-family: 'Syne', sans-serif;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: white;
+      transition: opacity 150ms ease;
+      white-space: nowrap;
+      min-height: 44px;
+    }
+
+    .form-submit:hover { opacity: 0.85; }
+    .form-submit:active { transform: scale(0.98); }
+
+    .decision-item {
+      border: 1px solid var(--rule);
+      border-left: 3px solid var(--purple);
+      margin-bottom: 1px;
+      background: var(--surface-1);
+      overflow: hidden;
+      transition: transform 200ms ease;
+      touch-action: pan-x;
+      min-height: 56px;
+      position: relative;
+    }
+
+    .decision-item.swiping { transform: translateX(-72px); }
+
+    .decision-content {
+      padding: var(--space-3) var(--space-4);
+    }
+
+    .decision-text {
+      font-family: 'Syne', sans-serif;
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+    }
+
+    .decision-meta {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9px;
+      color: var(--text-muted);
+      letter-spacing: 0.05em;
+    }
+
+    .decision-del-btn {
+      position: absolute;
+      right: 0;
+      top: 0;
+      bottom: 0;
+      width: 72px;
+      background: var(--red);
+      border: none;
+      cursor: pointer;
+      font-family: 'Syne', sans-serif;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: white;
+      transform: translateX(72px);
+      transition: transform 200ms ease;
+    }
+
+    .decision-item.swiping .decision-del-btn { transform: translateX(0); }
+
+    /* ── ALERTS TAB ── */
+    .form-select {
+      width: 100%;
+      background: var(--surface-2);
+      border: 1px solid var(--rule);
+      border-radius: 0;
+      padding: var(--space-3) var(--space-4);
+      color: var(--text-primary);
+      font-family: 'Syne', sans-serif;
+      font-size: 13px;
+      outline: none;
+      cursor: pointer;
+      transition: border-color 150ms ease;
+      margin-bottom: 1px;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+
+    .form-select:focus { border-color: var(--red); }
+
+    .alert-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--space-3) var(--space-4);
+      border: 1px solid var(--rule);
+      border-bottom: none;
+      background: var(--surface-1);
+      min-height: 52px;
+    }
+
+    .alert-row:last-child { border-bottom: 1px solid var(--rule); }
+
+    .alert-cond {
+      font-family: 'Syne', sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+
+    .alert-action-label {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-top: 2px;
+    }
+
+    .toggle-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--green);
+      flex-shrink: 0;
+    }
+
+    .toggle-dot.off { background: var(--rule); }
+
+    /* ── AGENTS TAB ── */
+    .agent-detail-row {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      padding: var(--space-3) var(--space-4);
+      border: 1px solid var(--rule);
+      border-bottom: none;
+      background: var(--surface-1);
+      min-height: 56px;
+      cursor: pointer;
+      transition: background 150ms ease;
+    }
+
+    .agent-detail-row:last-child { border-bottom: 1px solid var(--rule); }
+    .agent-detail-row:hover { background: var(--surface-2); }
+
+    .agent-detail-name {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      flex: 1;
+    }
+
+    .agent-detail-health {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .agent-detail-badge {
+      font-family: 'Syne', sans-serif;
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 2px 6px;
+      border: 1px solid;
+      flex-shrink: 0;
+    }
+
+    /* ── BLOCK CARD (panel wrapper) ── */
+    .block {
+      border: 1px solid var(--rule);
+      background: var(--surface-1);
+      margin-bottom: var(--space-5);
+    }
+
+    .block-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--space-2) var(--space-3);
+      border-bottom: 1px solid var(--rule);
+      background: var(--surface-2);
+    }
+
+    .block-title {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 13px;
+      letter-spacing: 0.1em;
+      color: var(--text-secondary);
+    }
+
+    .block-body {
+      padding: var(--space-4);
+    }
+
+    /* ── BOTTOM NAV (mobile only) ── */
+    .bottom-nav {
+      display: none;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 64px;
+      background: var(--black);
+      border-top: 1px solid var(--rule);
+      z-index: 150;
+      align-items: stretch;
+    }
+
+    @media (max-width: 768px) {
+      .bottom-nav { display: flex; }
+    }
+
+    .bnav-item {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--text-muted);
+      transition: color 150ms ease;
+      padding: var(--space-2) 0;
+      position: relative;
+    }
+
+    .bnav-item.active {
+      color: var(--red);
+    }
+
+    .bnav-item.active::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 20px;
+      height: 2px;
+      background: var(--red);
+    }
+
+    .bnav-icon {
+      width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .bnav-label {
+      font-family: 'Syne', sans-serif;
+      font-size: 8px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    /* ── PULL TO REFRESH ── */
+    .pull-refresh {
+      position: fixed;
+      top: -40px;
+      left: 0;
+      right: 0;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--space-2);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      z-index: 300;
+      background: var(--black);
+      border-bottom: 1px solid var(--rule);
+      transition: top 0.2s ease;
+    }
+
+    .pull-refresh.visible { top: 0; }
+
+    .spin-icon { display: inline-block; }
+    .spinning .spin-icon { animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── TOAST ── */
+    .toast {
+      position: fixed;
+      bottom: 80px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: var(--surface-3);
+      border: 1px solid var(--rule);
+      padding: var(--space-2) var(--space-4);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      color: var(--text-secondary);
+      letter-spacing: 0.05em;
+      opacity: 0;
+      transition: opacity 200ms ease, transform 200ms ease;
+      z-index: 999;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* ── EMPTY STATES ── */
+    .empty-state {
+      padding: var(--space-6) var(--space-4);
+      text-align: center;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      color: var(--text-muted);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    /* ── VOICE BTN ── */
+    .voice-btn {
+      background: none;
+      border: 1px solid var(--rule);
+      padding: 0 var(--space-3);
+      cursor: pointer;
+      color: var(--text-muted);
+      transition: color 150ms ease, border-color 150ms ease;
+      display: flex;
+      align-items: center;
+      height: 100%;
+    }
+
+    .voice-btn:hover { color: var(--text-secondary); border-color: var(--text-muted); }
+    .voice-btn.recording { color: var(--red); border-color: var(--red); animation: status-pulse 1s ease-in-out infinite; }
+
+    /* ── UTILITY ── */
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+
+    /* ── DESKTOP SIDEBAR LAYOUT ── */
+    @media (min-width: 769px) {
+      .col-main { min-width: 0; }
+      .col-side { width: 320px; flex-shrink: 0; }
+    }
+
+    /* Scrollbar styling */
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--rule); }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+  </style>
+</head>
+
+<body>
+  <!-- Swiss accent bar -->
+  <div class="swiss-bar" aria-hidden="true"></div>
+
+  <!-- Pull to refresh indicator -->
+  <div id="pullRefresh" class="pull-refresh" aria-hidden="true">
+    <span class="spin-icon">↻</span>
+    <span>REFRESH</span>
+  </div>
+
+  <!-- ── HEADER ── -->
+  <header class="site-header" role="banner">
+    <div class="site-logo">AHM <span>▸</span> CMD</div>
+
+    <div class="header-right">
+      <button id="ahm-nav-toggle" class="theme-btn" onclick="toggleGlobalNav()" aria-label="Open navigation">☰</button>
+      <!-- Voice input (moved from FAB) -->
+      <button class="voice-btn" id="voiceBtn" onclick="startVoice()" aria-label="Voice input" title="Voice Input">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="22"/>
+        </svg>
+      </button>
+
+      <!-- Connection status -->
+      <div id="connBadge" class="conn-badge" role="status" aria-live="polite">
+        <div id="connDot" class="conn-dot dead" aria-hidden="true"></div>
+        <span id="connLabel">OFFLINE</span>
+      </div>
+
+      <!-- Theme toggle -->
+      <button class="theme-btn" onclick="toggleTheme()" aria-label="Toggle light/dark theme">
+        <svg id="themeIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ── COMMAND BAR ── -->
+  <div class="command-zone" role="search">
+    <div class="command-inner" style="position:relative;">
+      <span class="command-cursor" aria-hidden="true">_</span>
+      <input
+        type="text"
+        id="commandInput"
+        class="command-input"
+        placeholder="/handoff bender fix bug..."
+        autocomplete="off"
+        autocorrect="off"
+        autocapitalize="off"
+        spellcheck="false"
+        aria-label="Command input"
+      >
+      <button class="voice-btn" id="voiceBtnCmd" onclick="startVoice()" aria-label="Voice input" style="border-left:1px solid var(--rule); border-right:1px solid var(--rule); border-top:none; border-bottom:none; padding:0 12px; display:none;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="22"/>
+        </svg>
+      </button>
+      <button class="command-exec-btn" onclick="runCommand()" aria-label="Execute command">EXEC ⏎</button>
+      <div id="suggestions" class="suggestions" role="listbox" aria-label="Command suggestions"></div>
+    </div>
+  </div>
+
+  <!-- ══════════════ DASHBOARD TAB ══════════════ -->
+  <div id="tab-dashboard" class="tab-content active page-content" role="tabpanel" aria-label="Dashboard">
+
+    <!-- METRICS -->
+    <div class="section-header">
+      <span class="section-title">Metrics</span>
+      <div class="section-rule" aria-hidden="true"></div>
+      <select id="clientFilter" class="client-filter" onchange="refreshAll()" aria-label="Filter by client">
+        <option value="">All Clients</option>
+        <option value="unt">UNT</option>
+        <option value="buddhas">Buddha's</option>
+        <option value="chromapages">Chromapages</option>
+      </select>
+    </div>
+
+    <div class="metrics-grid" role="region" aria-label="System metrics">
+      <div class="metric-card" role="group" aria-label="Total handoffs">
+        <div class="metric-label">Total</div>
+        <div id="totalHandoffs" class="metric-value mv-total" aria-live="polite">0</div>
+      </div>
+      <div class="metric-card mc-pending" role="group" aria-label="Pending handoffs">
+        <div class="metric-label">Pending</div>
+        <div id="pendingHandoffs" class="metric-value mv-pend" aria-live="polite">0</div>
+      </div>
+      <div class="metric-card mc-active" role="group" aria-label="Active handoffs">
+        <div class="metric-label">Active</div>
+        <div id="inProgressHandoffs" class="metric-value mv-active" aria-live="polite">0</div>
+      </div>
+      <div class="metric-card mc-done" role="group" aria-label="Completed handoffs">
+        <div class="metric-label">Done</div>
+        <div id="completedHandoffs" class="metric-value mv-done" aria-live="polite">0</div>
+      </div>
+      <div class="metric-card mc-failed" role="group" aria-label="Failed handoffs">
+        <div class="metric-label">Failed</div>
+        <div id="failedHandoffs" class="metric-value mv-fail" aria-live="polite">0</div>
+      </div>
+      <div class="metric-card" role="group" aria-label="Average health score">
+        <div class="metric-label">Health</div>
+        <div id="avgHealth" class="metric-value mv-health" aria-live="polite">100%</div>
+      </div>
+    </div>
+
+    <!-- MAIN CONTENT GRID (desktop: 2-col) -->
+    <div class="main-grid">
+      <div class="col-main">
+
+        <!-- AGENTS -->
+        <div class="section-spacer">
+          <div class="section-header">
+            <span class="section-title">Agents</span>
+            <div class="section-rule" aria-hidden="true"></div>
+          </div>
+          <div id="agentGrid" class="agents-grid" role="region" aria-label="Agent status grid">
+            <div class="empty-state">No agents</div>
+          </div>
+        </div>
+
+        <!-- HANDOFFS -->
+        <div class="section-spacer">
+          <div class="section-header">
+            <span class="section-title">Handoffs</span>
+            <div class="section-rule" aria-hidden="true"></div>
+          </div>
+          <div id="handoffsList" class="handoffs-list" role="log" aria-label="Recent handoffs" aria-live="polite">
+            <div class="empty-state">No handoffs yet</div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="col-side">
+        <!-- LIVE FEED -->
+        <div class="section-spacer">
+          <div class="section-header">
+            <span class="section-title">Live Feed</span>
+            <div class="section-rule" aria-hidden="true"></div>
+            <button class="section-action" onclick="clearFeed()" aria-label="Clear live feed">CLR</button>
+          </div>
+          <div class="live-feed">
+            <div id="liveFeed" class="feed-list" role="log" aria-label="Live activity feed" aria-live="polite">
+              <div class="feed-empty">Awaiting events...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══════════════ DECISIONS TAB ══════════════ -->
+  <div id="tab-decisions" class="tab-content page-content" role="tabpanel" aria-label="Decisions">
+
+    <div class="section-spacer">
+      <div class="section-header">
+        <span class="section-title">Log Decision</span>
+        <div class="section-rule" aria-hidden="true"></div>
+      </div>
+      <div class="block">
+        <div class="block-body">
+          <textarea
+            id="decisionText"
+            class="form-field"
+            rows="3"
+            placeholder="What did you decide?"
+            aria-label="Decision text"
+            style="margin-bottom:1px;"
+          ></textarea>
+          <div class="form-row">
+            <input
+              type="text"
+              id="decisionReason"
+              class="form-input-reason"
+              placeholder="Reason (optional)"
+              aria-label="Decision reason"
+            >
+            <button class="form-submit" onclick="logDecision()" aria-label="Log decision">Log</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-spacer">
+      <div class="section-header">
+        <span class="section-title">History</span>
+        <div class="section-rule" aria-hidden="true"></div>
+        <span class="section-action" style="cursor:default;">swipe ← to delete</span>
+      </div>
+      <div id="decisionsList" role="log" aria-label="Decision history" aria-live="polite">
+        <div class="empty-state">No decisions logged</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══════════════ ALERTS TAB ══════════════ -->
+  <div id="tab-alerts" class="tab-content page-content" role="tabpanel" aria-label="Alerts">
+
+    <div class="section-spacer">
+      <div class="section-header">
+        <span class="section-title">Create Alert Rule</span>
+        <div class="section-rule" aria-hidden="true"></div>
+      </div>
+      <div class="block">
+        <div class="block-body">
+          <select id="alertCondition" class="form-select" aria-label="Alert condition">
+            <option value="handoff_failed">Handoff fails</option>
+            <option value="handoff_overdue">Past SLA</option>
+            <option value="agent_stale">Agent stale</option>
+            <option value="agent_blocked">Agent blocked</option>
+            <option value="health_critical">Health &lt;50%</option>
+          </select>
+          <select id="alertAction" class="form-select" aria-label="Alert action">
+            <option value="discord">Discord notification</option>
+            <option value="log">Log only</option>
+            <option value="reassign">Reassign agent</option>
+          </select>
+          <button class="form-submit" onclick="createAlertRule()" style="width:100%; margin-top:1px;" aria-label="Create alert rule">Create Rule</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-spacer">
+      <div class="section-header">
+        <span class="section-title">Active Rules</span>
+        <div class="section-rule" aria-hidden="true"></div>
+      </div>
+      <div id="alertsList" role="list" aria-label="Alert rules">
+        <div class="empty-state">No rules configured</div>
+      </div>
+    </div>
+
+    <div class="section-spacer">
+      <div class="section-header">
+        <span class="section-title">Alert History</span>
+        <div class="section-rule" aria-hidden="true"></div>
+      </div>
+      <div id="alertHistory" class="handoffs-list" style="max-height:200px; overflow-y:auto;" role="log" aria-label="Alert history" aria-live="polite">
+        <div class="empty-state">No alerts triggered</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══════════════ AGENTS TAB ══════════════ -->
+  <div id="tab-agents" class="tab-content page-content" role="tabpanel" aria-label="Agents">
+    <div class="section-header">
+      <span class="section-title">Agent Status</span>
+      <div class="section-rule" aria-hidden="true"></div>
+    </div>
+    <div id="agentsList" role="list" aria-label="Agent details">
+      <div class="empty-state">No agents connected</div>
+    </div>
+  </div>
+
+  <!-- Global Bottom Nav will be injected here by global-nav.js -->
+
+  <!-- Toast notification -->
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    /* ══════════════════════════════════════════
+       AHM COMMAND CENTER — CONTROL ROOM v2
+       Swiss × Retro Design Language
+    ══════════════════════════════════════════ */
+
+    const API_BASE = '';
+    let ws = null;
+    let allHandoffs = [];
+    let decisions = [];
+    let alertRules = [];
+    let alertHistory = [];
+    let recognition = null;
+    let pullStartY = 0;
+
+    // ── THEME ──
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute('data-theme');
+      const next = current === 'light' ? 'dark' : 'light';
+      html.setAttribute('data-theme', next);
+      localStorage.setItem('ahm_theme', next);
+      updateThemeIcon(next);
+    }
+
+    function updateThemeIcon(theme) {
+      const icon = document.getElementById('themeIcon');
+      if (theme === 'light') {
+        icon.innerHTML = '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>';
+      } else {
+        icon.innerHTML = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
+      }
+    }
+
+    (function initTheme() {
+      const saved = localStorage.getItem('ahm_theme') || 'dark';
+      document.documentElement.setAttribute('data-theme', saved);
+      updateThemeIcon(saved);
+    })();
+
+    // ── TABS ──
+    let currentTab = 'dashboard';
+
+    function switchTab(tabName, tabEl) {
+      currentTab = tabName;
+
+      // Hide all tab content panels
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+      const target = document.getElementById('tab-' + tabName);
+      if (target) target.classList.add('active');
+
+      // Update tab-rail buttons (.tab-btn class)
+      document.querySelectorAll('.tab-btn').forEach(el => {
+        el.classList.remove('active');
+        el.setAttribute('aria-selected', 'false');
+      });
+      if (tabEl && tabEl.classList && tabEl.classList.contains('tab-btn')) {
+        tabEl.classList.add('active');
+        tabEl.setAttribute('aria-selected', 'true');
+      } else {
+        // Fallback: match by aria-controls attribute
+        const match = document.querySelector('.tab-btn[aria-controls="tab-' + tabName + '"]');
+        if (match) { match.classList.add('active'); match.setAttribute('aria-selected', 'true'); }
+      }
+
+      // Load tab data
+      if (tabName === 'decisions') loadDecisions();
+      if (tabName === 'alerts') loadAlertRules();
+      if (tabName === 'agents') loadAgentsDetailed();
+    }
+
+    // ── COMMANDS ──
+    const COMMANDS = [
+      { cmd: '/handoff', desc: 'Create handoff: /handoff bender fix bug' },
+      { cmd: '/decide',  desc: 'Log decision: /decide Use PostgreSQL reason: Performance' },
+      { cmd: '/health',  desc: 'Check health: /health bender' },
+      { cmd: '/template', desc: 'Run template: /template run research' },
+    ];
+
+    const cmdInput = document.getElementById('commandInput');
+    const suggestionsEl = document.getElementById('suggestions');
+
+    cmdInput.addEventListener('input', (e) => {
+      const val = e.target.value.toLowerCase();
+      if (val.startsWith('/')) {
+        const matches = COMMANDS.filter(c => c.cmd.startsWith(val));
+        if (matches.length > 0) {
+          suggestionsEl.innerHTML = matches.map(c =>
+            `<div class="suggestion-item" role="option" onclick="fillCommand('${c.cmd}')" tabindex="0">
+              <code>${c.cmd}</code>
+              <span style="color:var(--text-muted)"> — ${c.desc.split(':')[1]?.trim() || ''}</span>
+            </div>`
+          ).join('');
+          suggestionsEl.classList.add('show');
+        } else {
+          suggestionsEl.classList.remove('show');
+        }
+      } else {
+        suggestionsEl.classList.remove('show');
+      }
+    });
+
+    cmdInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && cmdInput.value.trim()) {
+        executeCommand(cmdInput.value.trim());
+        suggestionsEl.classList.remove('show');
+      }
+      if (e.key === 'Escape') suggestionsEl.classList.remove('show');
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.command-zone')) suggestionsEl.classList.remove('show');
+    });
+
+    function fillCommand(cmd) {
+      cmdInput.value = cmd + ' ';
+      cmdInput.focus();
+      suggestionsEl.classList.remove('show');
+    }
+
+    function runCommand() {
+      if (cmdInput.value.trim()) {
+        executeCommand(cmdInput.value.trim());
+        suggestionsEl.classList.remove('show');
+      }
+    }
+
+    async function executeCommand(cmd) {
+      cmdInput.value = '';
+      addFeedItem('system', cmd);
+      const parts = cmd.trim().split(/\s+/);
+      const command = parts[0].toLowerCase();
+      try {
+        switch(command) {
+          case '/handoff':
+            if (parts.length >= 3) await createHandoff('chroma', parts[1], parts.slice(2).join(' '));
+            else showToast('Usage: /handoff <agent> <task>');
+            break;
+          case '/decide':
+            const decide_text = parts.slice(1).join(' ').split('reason:')[0].trim();
+            const decide_reason = parts.join(' ').split('reason:')[1]?.trim() || '';
+            await logDecisionAPI(decide_text, decide_reason);
+            break;
+          case '/health':
+            if (parts[1]) {
+              const d = await (await fetch(API_BASE + '/api/agents/' + parts[1] + '/health')).json();
+              showToast(parts[1] + ': ' + d.healthScore + '% — ' + d.status);
+            } else {
+              await refreshAll();
+            }
+            break;
+          case '/template':
+            if (parts[1] === 'run' && parts[2]) {
+              await fetch(API_BASE + '/api/template/' + parts[2] + '/execute', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ task: parts.slice(3).join(' '), runAsync: true })
+              });
+              showToast('Template started: ' + parts[2]);
+            }
+            break;
+          default:
+            showToast('Unknown command: ' + command);
+        }
+      } catch(err) {
+        addFeedItem('system', 'ERR: ' + err.message);
+        showToast('Error: ' + err.message);
+      }
+    }
+
+    // ── HANDOFF ──
+    async function createHandoff(from, to, task, context) {
+      try {
+        await fetch(API_BASE + '/api/handoff', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ fromAgent: from, toAgent: to, task, context })
+        });
+        addFeedItem('created', from + ' → ' + to + ' / ' + task);
+        haptic();
+        refreshAll();
+      } catch(e) {
+        showToast('Failed to create handoff');
+      }
+    }
+
+    // ── DECISIONS ──
+    async function logDecisionAPI(text, reason) {
+      if (!text) return;
+      try {
+        await fetch(API_BASE + '/api/memory', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ type: 'decision', content: text, reason, source: 'user', tags: ['decision'] })
+        });
+        addFeedItem('decision', text);
+        haptic();
+        if (currentTab === 'decisions') loadDecisions();
+      } catch(e) {
+        showToast('Failed to log decision');
+      }
+    }
+
+    function logDecision() {
+      const text = document.getElementById('decisionText').value.trim();
+      const reason = document.getElementById('decisionReason').value.trim();
+      if (!text) { showToast('Enter a decision first'); return; }
+      logDecisionAPI(text, reason);
+      document.getElementById('decisionText').value = '';
+      document.getElementById('decisionReason').value = '';
+    }
+
+    async function loadDecisions() {
+      try {
+        const data = await (await fetch(API_BASE + '/api/memory?type=decision')).json();
+        decisions = data.memories || [];
+        renderDecisions();
+      } catch(e) {}
+    }
+
+    function renderDecisions() {
+      const el = document.getElementById('decisionsList');
+      if (!decisions.length) {
+        el.innerHTML = '<div class="empty-state">No decisions logged</div>';
+        return;
+      }
+      el.innerHTML = decisions.map(d => `
+        <div class="decision-item" data-id="${d.id}" role="listitem">
+          <div class="decision-content">
+            <div class="decision-text">${escHtml(d.content)}</div>
+            <div class="decision-meta">${escHtml(d.source || 'user')} &bull; ${new Date(d.createdAt).toLocaleString()}</div>
+          </div>
+          <button class="decision-del-btn" onclick="deleteDecision('${d.id}')" aria-label="Delete decision">DEL</button>
+        </div>
+      `).join('');
+    }
+
+    async function deleteDecision(id) {
+      try {
+        await fetch(API_BASE + '/api/memory/' + id, { method: 'DELETE' });
+        showToast('Decision deleted');
+        loadDecisions();
+      } catch(e) {
+        showToast('Failed to delete');
+      }
+    }
+
+    // ── SWIPE TO DELETE (decisions) ──
+    let swipeTarget = null, swipeStartX = 0;
+
+    document.addEventListener('touchstart', (e) => {
+      swipeStartX = e.touches[0].clientX;
+      swipeTarget = e.target.closest('.decision-item');
+    }, { passive: true });
+
+    document.addEventListener('touchmove', (e) => {
+      if (!swipeTarget) return;
+      const dx = e.touches[0].clientX - swipeStartX;
+      if (dx < -20) swipeTarget.classList.add('swiping');
+      else if (dx > 10) swipeTarget.classList.remove('swiping');
+    }, { passive: true });
+
+    document.addEventListener('touchend', () => {
+      swipeTarget = null;
+    }, { passive: true });
+
+    // ── ALERTS ──
+    function loadAlertRules() {
+      alertRules = JSON.parse(localStorage.getItem('ahm_alert_rules') || '[]');
+      alertHistory = JSON.parse(localStorage.getItem('ahm_alert_history') || '[]');
+      renderAlerts();
+    }
+
+    function createAlertRule() {
+      const condition = document.getElementById('alertCondition').value;
+      const action = document.getElementById('alertAction').value;
+      alertRules.push({ id: Date.now(), condition, action, enabled: true });
+      localStorage.setItem('ahm_alert_rules', JSON.stringify(alertRules));
+      renderAlerts();
+      showToast('Alert rule created');
+    }
+
+    function renderAlerts() {
+      const condLabels = {
+        handoff_failed: 'Handoff Fails',
+        handoff_overdue: 'Past SLA',
+        agent_stale: 'Agent Stale',
+        agent_blocked: 'Agent Blocked',
+        health_critical: 'Health < 50%'
+      };
+      const actLabels = { discord: 'Discord', log: 'Log Only', reassign: 'Reassign' };
+
+      const rulesEl = document.getElementById('alertsList');
+      if (!alertRules.length) {
+        rulesEl.innerHTML = '<div class="empty-state">No rules configured</div>';
+      } else {
+        rulesEl.innerHTML = alertRules.map(r => `
+          <div class="alert-row" role="listitem">
+            <div>
+              <div class="alert-cond">${condLabels[r.condition] || r.condition}</div>
+              <div class="alert-action-label">→ ${actLabels[r.action] || r.action}</div>
+            </div>
+            <div class="toggle-dot ${r.enabled ? '' : 'off'}" aria-label="${r.enabled ? 'Enabled' : 'Disabled'}"></div>
+          </div>
+        `).join('');
+      }
+
+      const histEl = document.getElementById('alertHistory');
+      if (!alertHistory.length) {
+        histEl.innerHTML = '<div class="empty-state">No alerts triggered</div>';
+      } else {
+        histEl.innerHTML = alertHistory.map(a => `
+          <div class="handoff-row">
+            <div class="hr-time">${new Date(a.time).toLocaleTimeString()}</div>
+            <div class="hr-task">${escHtml(a.msg)}</div>
+          </div>
+        `).join('');
+      }
+    }
+
+    // ── AGENTS ──
+    async function loadAgentsDetailed() {
+      try {
+        const data = await (await fetch(API_BASE + '/api/agents/health')).json();
+        const agents = data.agents || [];
+        const el = document.getElementById('agentsList');
+        if (!agents.length) {
+          el.innerHTML = '<div class="empty-state">No agents connected</div>';
+          return;
+        }
+        const statusColors = {
+          healthy: { text: 'var(--green)', border: 'var(--green)', bg: 'var(--green-bg)' },
+          stale:   { text: 'var(--amber)', border: 'var(--amber)', bg: 'var(--amber-bg)' },
+          blocked: { text: 'var(--amber)', border: 'var(--amber)', bg: 'var(--amber-bg)' },
+          critical:{ text: 'var(--red)',   border: 'var(--red)',   bg: 'var(--red-bg)' },
+          idle:    { text: 'var(--text-muted)', border: 'var(--rule)', bg: 'transparent' },
+        };
+        el.innerHTML = agents.map(a => {
+          const sc = statusColors[a.status] || statusColors.idle;
+          const score = a.healthScore || 0;
+          return `
+            <div class="agent-detail-row" role="listitem">
+              <div style="width:8px;height:8px;border-radius:50%;background:${sc.text};flex-shrink:0;" aria-hidden="true"></div>
+              <div class="agent-detail-name">${escHtml(a.agentId)}</div>
+              <div class="agent-detail-health" style="color:${sc.text};text-shadow:0 0 16px ${sc.text}40;">${score}%</div>
+              <div class="agent-detail-badge" style="color:${sc.text};border-color:${sc.border};background:${sc.bg};">${(a.status||'idle').toUpperCase()}</div>
+            </div>
+          `;
+        }).join('');
+      } catch(e) {}
+    }
+
+    // ── REFRESH ALL ──
+    async function refreshAll() {
+      try {
+        const clientFilter = document.getElementById('clientFilter')?.value || '';
+        const clientParam = clientFilter ? `?client=${clientFilter}` : '';
+        
+        const [dash, handoffs, health, pipeline, activity] = await Promise.all([
+          fetch(API_BASE + '/api/dashboard').then(r => r.json()),
+          fetch(API_BASE + `/api/handoffs${clientParam}`).then(r => r.json()),
+          fetch(API_BASE + '/api/agents/health').then(r => r.json()),
+          fetch(API_BASE + `/api/health/pipeline${clientParam}`).then(r => r.json()),
+          fetch(API_BASE + `/api/agents/activity${clientParam}`).then(r => r.json())
+        ]);
+
+        // Use pipeline stats if filtered, otherwise fall back to dashboard
+        const p = pipeline?.byStatus || {};
+        const s = clientFilter ? p : (dash.summary || {});
+        animateCount('totalHandoffs', s.total || p.pending + p.in_progress + p.completed + p.failed || 0);
+        animateCount('pendingHandoffs', s.pending || p.pending || 0);
+        animateCount('inProgressHandoffs', s.inProgress || p.in_progress || 0);
+        animateCount('completedHandoffs', s.completed || p.completed || 0);
+        animateCount('failedHandoffs', s.failed || p.failed || 0);
+        document.getElementById('avgHealth').textContent = (health.summary?.avgHealthScore ?? 100) + '%';
+
+        allHandoffs = Array.isArray(handoffs) ? handoffs : (handoffs.handoffs || []);
+        renderHandoffs();
+        renderAgentGrid(health.agents || []);
+        
+        // Update activity display if we have filtered data
+        if (clientFilter && activity) {
+          console.log(`Active: ${activity.activeCount} for client: ${clientFilter}`);
+        }
+      } catch(e) {}
+    }
+
+    function animateCount(elId, target) {
+      const el = document.getElementById(elId);
+      const current = parseInt(el.textContent) || 0;
+      if (current === target) return;
+      const diff = target - current;
+      const steps = Math.min(Math.abs(diff), 20);
+      const step = diff / steps;
+      let count = current;
+      let i = 0;
+      const interval = setInterval(() => {
+        i++;
+        count += step;
+        el.textContent = Math.round(i === steps ? target : count);
+        if (i >= steps) clearInterval(interval);
+      }, 30);
+    }
+
+    function renderAgentGrid(agents) {
+      const el = document.getElementById('agentGrid');
+      if (!agents.length) {
+        el.innerHTML = '<div class="empty-state">No agents</div>';
+        return;
+      }
+      const statusClass = {
+        healthy: 'agent-healthy', stale: 'agent-stale',
+        blocked: 'agent-stale', critical: 'agent-critical', idle: 'agent-idle'
+      };
+      el.innerHTML = agents.map(a => {
+        const cls = statusClass[a.status] || 'agent-idle';
+        return `
+          <div class="agent-chip ${cls}" role="button" tabindex="0" aria-label="${a.agentId} - ${a.status} - ${a.healthScore}%">
+            <div class="agent-name">
+              <span class="agent-dot" aria-hidden="true"></span>
+              ${escHtml(a.agentId).toUpperCase().substring(0, 6)}
+            </div>
+            <div class="agent-score">${a.healthScore || 0}%</div>
+            <div class="agent-status-label">${(a.status || 'idle').toUpperCase()}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderHandoffs() {
+      const el = document.getElementById('handoffsList');
+      const recent = allHandoffs.slice(-10).reverse();
+      if (!recent.length) {
+        el.innerHTML = '<div class="empty-state">No handoffs yet</div>';
+        return;
+      }
+      el.innerHTML = recent.map(h => {
+        const statusLabel = (h.status || 'pending').replace('_', ' ').toUpperCase();
+        const timeStr = h.createdAt ? new Date(h.createdAt).toLocaleTimeString() : '';
+        const clientBadge = h.client ? `<span class="hr-client-badge">${escHtml(h.client)}</span>` : '';
+        return `
+          <div class="handoff-row hr-${h.status || 'pending'}" role="listitem">
+            <span class="hr-status-badge">${statusLabel}</span>
+            ${clientBadge}
+            <span class="hr-agents">${escHtml(h.fromAgent || '?')} → ${escHtml(h.toAgent || '?')}</span>
+            <span class="hr-task">${escHtml(h.task || '')}</span>
+            <span class="hr-time">${timeStr}</span>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // ── LIVE FEED ──
+    function addFeedItem(type, msg) {
+      const feed = document.getElementById('liveFeed');
+      const emptyEl = feed.querySelector('.feed-empty');
+      if (emptyEl) emptyEl.remove();
+
+      const item = document.createElement('div');
+      item.className = `feed-item fi-${type}`;
+      item.innerHTML = `
+        <span class="feed-time">${new Date().toLocaleTimeString()}</span>
+        <span class="feed-msg">${escHtml(String(msg))}</span>
+      `;
+      feed.insertBefore(item, feed.firstChild);
+
+      while (feed.children.length > 20) feed.removeChild(feed.lastChild);
+    }
+
+    function clearFeed() {
+      document.getElementById('liveFeed').innerHTML = '<div class="feed-empty">Feed cleared</div>';
+    }
+
+    // ── WEBSOCKET ──
+    function connectWebSocket() {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = protocol + '//' + window.location.host;
+      try {
+        ws = new WebSocket(wsUrl);
+        ws.onopen = () => {
+          document.getElementById('connDot').className = 'conn-dot live';
+          document.getElementById('connLabel').textContent = 'LIVE';
+          addFeedItem('system', 'CONNECTED');
+        };
+        ws.onmessage = (e) => {
+          try {
+            const d = JSON.parse(e.data);
+            const icons = { created: '↗', started: '▶', completed: '✓', cancelled: '✗', failed: '✗' };
+            const icon = icons[d.type] || '·';
+            addFeedItem(d.type === 'completed' ? 'completed' : d.type === 'failed' ? 'failed' : 'created',
+              icon + ' ' + (d.data?.toAgent || d.type || 'event'));
+            haptic();
+            refreshAll();
+          } catch(err) {}
+        };
+        ws.onclose = () => {
+          document.getElementById('connDot').className = 'conn-dot dead';
+          document.getElementById('connLabel').textContent = 'OFFLINE';
+          setTimeout(connectWebSocket, 3000);
+        };
+        ws.onerror = () => {};
+      } catch(e) {
+        setTimeout(connectWebSocket, 3000);
+      }
+    }
+
+    // ── VOICE ──
+    function startVoice() {
+      const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRec) { showToast('Voice not supported in this browser'); return; }
+      const btn = document.getElementById('voiceBtn');
+      if (recognition) { recognition.stop(); return; }
+      btn.classList.add('recording');
+      recognition = new SpeechRec();
+      recognition.lang = 'en-US';
+      recognition.onresult = (e) => {
+        const text = e.results[0][0].transcript;
+        document.getElementById('commandInput').value = text;
+        showToast('Voice: ' + text);
+        executeCommand(text);
+        recognition = null;
+      };
+      recognition.onerror = () => { btn.classList.remove('recording'); recognition = null; };
+      recognition.onend = () => { btn.classList.remove('recording'); recognition = null; };
+      recognition.start();
+      showToast('Listening...');
+    }
+
+    // ── PULL TO REFRESH ──
+    document.addEventListener('touchstart', (e) => {
+      if (window.scrollY === 0) pullStartY = e.touches[0].clientY;
+    }, { passive: true });
+
+    document.addEventListener('touchmove', (e) => {
+      if (pullStartY > 0 && window.scrollY === 0) {
+        const deltaY = e.touches[0].clientY - pullStartY;
+        const el = document.getElementById('pullRefresh');
+        if (deltaY > 40) el.classList.add('visible', 'spinning');
+        else el.classList.remove('visible', 'spinning');
+      }
+    }, { passive: true });
+
+    document.addEventListener('touchend', () => {
+      const el = document.getElementById('pullRefresh');
+      if (el.classList.contains('spinning')) {
+        refreshAll().then(() => {
+          setTimeout(() => el.classList.remove('visible', 'spinning'), 600);
+        });
+      }
+      pullStartY = 0;
+    }, { passive: true });
+
+    // ── UTILITIES ──
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2800);
+    }
+
+    function haptic() {
+      if (navigator.vibrate) navigator.vibrate(30);
+    }
+
+    function escHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    // ── INIT ──
+    document.addEventListener('DOMContentLoaded', () => {
+      refreshAll();
+      connectWebSocket();
+    });
+  </script>
+  <script src="js/global-nav.js"></script>
+</body>
+</html>

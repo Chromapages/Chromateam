@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; font-src 'self' https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; connect-src 'self' ws://localhost:* wss://localhost:* http://localhost:* https://localhost:*; img-src 'self' data:; media-src: *;">
+  <title>AHM — Client View</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#080807">
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;700&family=Syne:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/global-nav.css">
+  <style>
+    :root {
+      --black: #080807;
+      --surface-1: #0F0F0D;
+      --surface-2: #171714;
+      --surface-3: #202019;
+      --rule: #2C2C28;
+      --text-primary: #EDE9DC;
+      --text-secondary: #7A7770;
+      --text-muted: #3D3D38;
+      --red: #E11934;
+      --amber: #D4860A;
+      --green: #16A34A;
+      --blue: #1D6FA4;
+      --purple: #7C3AED;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      background: var(--black);
+      color: var(--text-primary);
+      font-family: 'Syne', sans-serif;
+      min-height: 100vh;
+    }
+    .ahm-header {
+      background: var(--surface-1);
+      border-bottom: 1px solid var(--rule);
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .ahm-header h1 {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 18px;
+      letter-spacing: 0.1em;
+      color: var(--text-primary);
+    }
+    .client-selector {
+      margin-left: auto;
+      background: var(--surface-2);
+      border: 1px solid var(--rule);
+      color: var(--text-primary);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      min-width: 200px;
+    }
+    .client-name {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 28px;
+      letter-spacing: 0.1em;
+      color: var(--purple);
+      padding: 20px;
+      border-bottom: 1px solid var(--rule);
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 12px;
+      padding: 20px;
+      background: var(--surface-2);
+      border-bottom: 1px solid var(--rule);
+    }
+    .stat-card {
+      background: var(--surface-1);
+      border: 1px solid var(--rule);
+      padding: 16px;
+      border-radius: 6px;
+      text-align: center;
+    }
+    .stat-value {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 32px;
+      color: var(--text-primary);
+    }
+    .stat-value.active { color: var(--blue); }
+    .stat-value.done { color: var(--green); }
+    .stat-value.pending { color: var(--amber); }
+    .stat-value.failed { color: var(--red); }
+    .stat-label {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      margin-top: 4px;
+    }
+    .section {
+      padding: 20px;
+      border-bottom: 1px solid var(--rule);
+    }
+    .section-header {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 14px;
+      letter-spacing: 0.1em;
+      color: var(--text-secondary);
+      margin-bottom: 16px;
+    }
+    .item-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .item-row {
+      background: var(--surface-1);
+      border: 1px solid var(--rule);
+      padding: 12px 16px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .item-status {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 3px;
+      min-width: 70px;
+      text-align: center;
+    }
+    .item-status.pending { color: var(--amber); background: rgba(212,134,10,0.15); }
+    .item-status.in_progress { color: var(--blue); background: rgba(29,111,164,0.15); }
+    .item-status.completed { color: var(--green); background: rgba(22,163,74,0.15); }
+    .item-status.failed { color: var(--red); background: rgba(225,25,52,0.15); }
+    .item-title {
+      flex: 1;
+      font-size: 13px;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .item-meta {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+    .tabs {
+      display: flex;
+      gap: 0;
+      background: var(--surface-2);
+      border-bottom: 1px solid var(--rule);
+      padding: 0 20px;
+    }
+    .tab {
+      padding: 16px 24px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+    }
+    .tab:hover { color: var(--text-secondary); }
+    .tab.active {
+      color: var(--purple);
+      border-bottom-color: var(--purple);
+    }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--text-muted);
+    }
+    @media (max-width: 768px) {
+      .ahm-header { flex-wrap: wrap; }
+      .client-selector { margin-left: 0; width: 100%; }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <div class="ahm-header">
+    <button onclick="window.location.href='/dashboard'" style="background:none;border:none;color:var(--text-primary);font-size:20px;cursor:pointer;">←</button>
+    <h1>CLIENT COMMAND</h1>
+    <select id="clientSelect" class="client-selector" onchange="loadClient()">
+      <option value="">Select a client...</option>
+      <option value="unt">UNT (Union National Tax)</option>
+      <option value="buddhas">Buddha's Hawaiian Bakery</option>
+      <option value="chromapages">Chromapages</option>
+    </select>
+  </div>
+
+  <div id="clientView" style="display:none;">
+    <div class="client-name" id="clientTitle">CLIENT NAME</div>
+    
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value" id="statTasksTotal">0</div>
+        <div class="stat-label">Total Tasks</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value active" id="statTasksActive">0</div>
+        <div class="stat-label">In Progress</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value pending" id="statPendingApprovals">0</div>
+        <div class="stat-label">Pending Review</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value done" id="statHandoffsDone">0</div>
+        <div class="stat-label">Handoffs Done</div>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <div class="tab active" data-tab="tasks" onclick="switchTab('tasks')">Tasks</div>
+      <div class="tab" data-tab="handoffs" onclick="switchTab('handoffs')">Handoffs</div>
+      <div class="tab" data-tab="marketing" onclick="switchTab('marketing')">Marketing</div>
+      <div class="tab" data-tab="schedules" onclick="switchTab('schedules')">Schedules</div>
+    </div>
+
+    <div id="tab-tasks" class="tab-content active">
+      <div class="section">
+        <div class="section-header">RECENT TASKS</div>
+        <div class="item-list" id="tasksList"></div>
+      </div>
+    </div>
+
+    <div id="tab-handoffs" class="tab-content">
+      <div class="section">
+        <div class="section-header">RECENT HANDOFFS</div>
+        <div class="item-list" id="handoffsList"></div>
+      </div>
+    </div>
+
+    <div id="tab-marketing" class="tab-content">
+      <div class="section">
+        <div class="section-header">MARKETING REQUESTS</div>
+        <div class="item-list" id="marketingList"></div>
+      </div>
+    </div>
+
+    <div id="tab-schedules" class="tab-content">
+      <div class="section">
+        <div class="section-header">SCHEDULED JOBS</div>
+        <div class="item-list" id="schedulesList"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="emptyView" class="empty-state">
+    <div style="font-size: 48px; margin-bottom: 16px;">🎯</div>
+    <div>Select a client to view their command center</div>
+  </div>
+
+  <script>
+    let currentClient = null;
+
+    async function loadClient() {
+      const clientId = document.getElementById('clientSelect').value;
+      if (!clientId) {
+        document.getElementById('clientView').style.display = 'none';
+        document.getElementById('emptyView').style.display = 'block';
+        return;
+      }
+      
+      currentClient = clientId;
+      document.getElementById('clientView').style.display = 'block';
+      document.getElementById('emptyView').style.display = 'none';
+      
+      const titles = {
+        unt: 'UNT (Union National Tax)',
+        buddhas: "Buddha's Hawaiian Bakery",
+        chromapages: 'Chromapages'
+      };
+      document.getElementById('clientTitle').textContent = titles[clientId] || clientId.toUpperCase();
+      
+      try {
+        const res = await fetch(`/api/clients/${clientId}`);
+        const data = await res.json();
+        renderClientData(data);
+      } catch (e) {
+        console.error('Failed to load client:', e);
+      }
+    }
+
+    function renderClientData(data) {
+      // Stats
+      const s = data.stats;
+      document.getElementById('statTasksTotal').textContent = s.tasks.total;
+      document.getElementById('statTasksActive').textContent = s.tasks.in_progress;
+      document.getElementById('statPendingApprovals').textContent = s.tasks.pending_review;
+      document.getElementById('statHandoffsDone').textContent = s.handoffs.completed;
+      
+      // Tasks
+      const tasksHtml = data.tasks.map(t => `
+        <div class="item-row">
+          <span class="item-status ${t.column}">${t.column.replace('_', ' ')}</span>
+          <span class="item-title">${escapeHtml(t.title)}</span>
+          <span class="item-meta">${t.owner}</span>
+        </div>
+      `).join('') || '<div class="empty-state">No tasks</div>';
+      document.getElementById('tasksList').innerHTML = tasksHtml;
+      
+      // Handoffs
+      const handoffsHtml = data.handoffs.map(h => `
+        <div class="item-row">
+          <span class="item-status ${h.status}">${h.status}</span>
+          <span class="item-title">${escapeHtml(h.task)}</span>
+          <span class="item-meta">${h.toAgent}</span>
+        </div>
+      `).join('') || '<div class="empty-state">No handoffs</div>';
+      document.getElementById('handoffsList').innerHTML = handoffsHtml;
+      
+      // Marketing
+      const mktHtml = data.marketingRequests.map(m => `
+        <div class="item-row">
+          <span class="item-status ${m.status}">${m.status}</span>
+          <span class="item-title">${escapeHtml(m.title)}</span>
+          <span class="item-meta">${m.type}</span>
+        </div>
+      `).join('') || '<div class="empty-state">No marketing requests</div>';
+      document.getElementById('marketingList').innerHTML = mktHtml;
+      
+      // Schedules
+      const schedHtml = data.schedules.map(s => `
+        <div class="item-row">
+          <span class="item-status pending">SCHEDULED</span>
+          <span class="item-title">${escapeHtml(s.name)}</span>
+          <span class="item-meta">${s.schedule?.kind || 'unknown'}</span>
+        </div>
+      `).join('') || '<div class="empty-state">No scheduled jobs</div>';
+      document.getElementById('schedulesList').innerHTML = schedHtml;
+    }
+
+    function switchTab(tabName) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      document.querySelector(`.tab[data-tab="${tabName}"]`).classList.add('active');
+      document.getElementById(`tab-${tabName}`).classList.add('active');
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; font-src 'self' https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; connect-src 'self' ws://localhost:* wss://localhost:* http://localhost:* https://localhost:*; img-src 'self' data:; media-src: *;">
+  <title>AHM — Approvals</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#080807">
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;700&family=Syne:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/global-nav.css">
+  <style>
+    :root {
+      --black: #080807;
+      --surface-1: #0F0F0D;
+      --surface-2: #171714;
+      --surface-3: #202019;
+      --rule: #2C2C28;
+      --text-primary: #EDE9DC;
+      --text-secondary: #7A7770;
+      --text-muted: #3D3D38;
+      --red: #E11934;
+      --amber: #D4860A;
+      --green: #16A34A;
+      --blue: #1D6FA4;
+      --purple: #7C3AED;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      background: var(--black);
+      color: var(--text-primary);
+      font-family: 'Syne', sans-serif;
+      min-height: 100vh;
+    }
+    .ahm-header {
+      background: var(--surface-1);
+      border-bottom: 1px solid var(--rule);
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .ahm-header h1 {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 18px;
+      letter-spacing: 0.1em;
+      color: var(--text-primary);
+    }
+    .client-filter {
+      margin-left: auto;
+      background: var(--surface-2);
+      border: 1px solid var(--rule);
+      color: var(--text-primary);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      padding: 6px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .approval-card {
+      background: var(--surface-1);
+      border: 1px solid var(--rule);
+      border-left: 4px solid var(--amber);
+      margin: 12px 20px;
+      padding: 16px;
+      border-radius: 4px;
+    }
+    .approval-card.approved { border-left-color: var(--green); }
+    .approval-card.rejected { border-left-color: var(--red); }
+    .approval-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+    .approval-type {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9px;
+      font-weight: 700;
+      color: var(--blue);
+      background: rgba(29,111,164,0.15);
+      padding: 3px 8px;
+      border-radius: 3px;
+      text-transform: uppercase;
+    }
+    .approval-client {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9px;
+      font-weight: 600;
+      color: var(--purple);
+      background: rgba(124,58,237,0.15);
+      padding: 3px 8px;
+      border-radius: 3px;
+    }
+    .approval-priority {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 3px;
+      margin-left: auto;
+    }
+    .approval-priority.urgent { background: var(--red); color: white; }
+    .approval-priority.high { color: var(--amber); border: 1px solid var(--amber); }
+    .approval-priority.medium { color: var(--blue); border: 1px solid var(--blue); }
+    .approval-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: var(--text-primary);
+    }
+    .approval-desc {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-bottom: 12px;
+      line-height: 1.5;
+    }
+    .approval-meta {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+    .approval-actions {
+      display: flex;
+      gap: 8px;
+    }
+    .btn {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+    }
+    .btn-approve {
+      background: var(--green);
+      color: white;
+    }
+    .btn-approve:hover { background: #0f9d4a; }
+    .btn-reject {
+      background: transparent;
+      color: var(--red);
+      border: 1px solid var(--red);
+    }
+    .btn-reject:hover { background: var(--red); color: white; }
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+    }
+    .empty-state-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+    .section-header {
+      padding: 16px 20px 8px;
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      color: var(--text-secondary);
+    }
+    .stats-bar {
+      display: flex;
+      gap: 16px;
+      padding: 16px 20px;
+      background: var(--surface-2);
+      border-bottom: 1px solid var(--rule);
+    }
+    .stat-item {
+      text-align: center;
+    }
+    .stat-value {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 24px;
+      color: var(--text-primary);
+    }
+    .stat-label {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+    }
+    @media (max-width: 768px) {
+      .ahm-header { flex-wrap: wrap; }
+      .client-filter { margin-left: 0; width: 100%; margin-top: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="ahm-header">
+    <button id="ahm-nav-toggle" onclick="document.body.classList.toggle('nav-open')" style="background:none;border:none;color:var(--text-primary);font-size:20px;cursor:pointer;">☰</button>
+    <h1>COMMAND CENTER // APPROVALS</h1>
+    <select id="clientFilter" class="client-filter" onchange="loadApprovals()">
+      <option value="">All Clients</option>
+      <option value="unt">UNT</option>
+      <option value="buddhas">Buddha's</option>
+      <option value="chromapages">Chromapages</option>
+    </select>
+  </div>
+
+  <div class="stats-bar">
+    <div class="stat-item">
+      <div class="stat-value" id="totalApprovals">0</div>
+      <div class="stat-label">Pending</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-value" id="untApprovals">0</div>
+      <div class="stat-label">UNT</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-value" id="buddhasApprovals">0</div>
+      <div class="stat-label">Buddha's</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-value" id="chromapagesApprovals">0</div>
+      <div class="stat-label">Chromapages</div>
+    </div>
+  </div>
+
+  <div id="approvalsList">
+    <div class="empty-state">
+      <div class="empty-state-icon">✓</div>
+      <div>No pending approvals</div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = '';
+    let allApprovals = [];
+
+    async function loadApprovals() {
+      const client = document.getElementById('clientFilter').value;
+      const url = client ? `/api/approvals?client=${client}` : '/api/approvals';
+      
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        allApprovals = data.approvals || [];
+        renderApprovals();
+        updateStats();
+      } catch (e) {
+        console.error('Failed to load approvals:', e);
+      }
+    }
+
+    function updateStats() {
+      document.getElementById('totalApprovals').textContent = allApprovals.length;
+      document.getElementById('untApprovals').textContent = allApprovals.filter(a => a.client === 'unt').length;
+      document.getElementById('buddhasApprovals').textContent = allApprovals.filter(a => a.client === 'buddhas').length;
+      document.getElementById('chromapagesApprovals').textContent = allApprovals.filter(a => a.client === 'chromapages').length;
+    }
+
+    function renderApprovals() {
+      const el = document.getElementById('approvalsList');
+      
+      if (!allApprovals.length) {
+        el.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">✓</div>
+            <div>No pending approvals</div>
+          </div>
+        `;
+        return;
+      }
+
+      el.innerHTML = allApprovals.map(a => {
+        const clientBadge = a.client ? `<span class="approval-client">${a.client.toUpperCase()}</span>` : '';
+        const typeLabel = a.type === 'marketing_request' ? 'MARKETING' : 'TASK';
+        const timeAgo = getTimeAgo(a.createdAt);
+        
+        return `
+          <div class="approval-card" data-id="${a.id}" data-type="${a.type}">
+            <div class="approval-header">
+              <span class="approval-type">${typeLabel}</span>
+              ${clientBadge}
+              <span class="approval-priority ${a.priority || 'medium'}">${(a.priority || 'medium').toUpperCase()}</span>
+            </div>
+            <div class="approval-title">${escapeHtml(a.title)}</div>
+            <div class="approval-desc">${escapeHtml(a.description || '')}</div>
+            <div class="approval-meta">Created ${timeAgo} • Owner: ${a.owner || 'unassigned'}</div>
+            <div class="approval-actions">
+              <button class="btn btn-approve" onclick="approve('${a.id}', '${a.type}')">Approve</button>
+              <button class="btn btn-reject" onclick="reject('${a.id}', '${a.type}')">Reject</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function approve(id, type) {
+      if (type !== 'task') {
+        alert('Only task approvals supported for now');
+        return;
+      }
+      
+      try {
+        const res = await fetch(`/api/approvals/task/${id}/approve`, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          loadApprovals();
+        }
+      } catch (e) {
+        console.error('Failed to approve:', e);
+      }
+    }
+
+    async function reject(id, type) {
+      if (type !== 'task') {
+        alert('Only task rejections supported for now');
+        return;
+      }
+      
+      const reason = prompt('Rejection reason (optional):');
+      
+      try {
+        const res = await fetch(`/api/approvals/task/${id}/reject`, { 
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ reason })
+        });
+        const data = await res.json();
+        if (data.success) {
+          loadApprovals();
+        }
+      } catch (e) {
+        console.error('Failed to reject:', e);
+      }
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function getTimeAgo(dateStr) {
+      const date = new Date(dateStr);
+      const now = new Date();
+      const diff = Math.floor((now - date) / 1000);
+      
+      if (diff < 60) return 'just now';
+      if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
+      if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
+      return `${Math.floor(diff/86400)}d ago`;
+    }
+
+    // Load on page load
+    loadApprovals();
+    
+    // Refresh every 30 seconds
+    setInterval(loadApprovals, 30000);
+  </script>
+</body>
+</html>

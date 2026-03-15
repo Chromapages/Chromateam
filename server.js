@@ -23,11 +23,13 @@
 
 require('dotenv').config();
 const express = require('express');
+const compression = require('compression');
 const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const config = require('./config');
+const crmRouter = require('./crm/index');
 
 // File upload setup
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -57,12 +59,504 @@ const upload = multer({
 
 const app = express();
 
-// Storage
-const handoffs = new Map();
+// Storage (P0: Loaded from disk - see persistence layer below)
+// const handoffs = new Map(); // Now loaded from data/handoffs.json
 const agentContexts = new Map();
 const templates = new Map();
 const feedback = new Map();
+const contextPackets = new Map(); // Explicit context packets for handoffs
 const taskHistory = []; // For similar task recall
+
+const DEFAULT_OUTPUT_DIR = process.env.OUTPUT_DIR || '/Volumes/MiDRIVE/Chroma-Team/output';
+const MARKETING_OUTPUT_ROOT = path.join(DEFAULT_OUTPUT_DIR, 'marketing');
+const BUILDS_OUTPUT_ROOT = path.join(DEFAULT_OUTPUT_DIR, 'builds');
+const WORK_MODE_ARTIFACT = 'artifact';
+const WORK_MODE_IN_PLACE = 'in_place';
+
+const MARKETING_AGENT_IDS = new Set([
+  'pixel',
+  'canvas',
+  'flux',
+  'glyph',
+  'prism',
+  'seo-specialist',
+  'ad-creator',
+  'email-marketer',
+  'content-writer',
+  'social-manager',
+  'competitor-analyst',
+]);
+
+const BUILD_AGENT_IDS = new Set([
+  'bender',
+  'frontend-dev',
+  'backend-dev',
+  'code-reviewer',
+  'qa-tester',
+  'mobile-dev',
+]);
+
+// ==================== PERSISTENCE LAYER ====================
+const HANDOFFS_FILE = path.join(__dirname, 'data', 'handoffs.json');
+const DELIVERABLES_FILE = path.join(__dirname, 'data', 'deliverables.json');
+
+function ensureDataDir() {
+  const dataDir = path.join(__dirname, 'data');
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+}
+
+function loadHandoffs() {
+  ensureDataDir();
+  if (fs.existsSync(HANDOFFS_FILE)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(HANDOFFS_FILE, 'utf8'));
+      console.log(`📂 Loaded ${data.length} handoffs from disk`);
+      return new Map(data.map(h => [h.id, h]));
+    } catch (e) {
+      console.error('⚠️ Failed to load handoffs:', e.message);
+    }
+  }
+  return new Map();
+}
+
+function saveHandoffs() {
+  ensureDataDir();
+  try {
+    const data = Array.from(handoffs.values());
+    fs.writeFileSync(HANDOFFS_FILE, JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.error('⚠️ Failed to save handoffs:', e.message);
+  }
+}
+
+function loadDeliverables() {
+  ensureDataDir();
+  if (fs.existsSync(DELIVERABLES_FILE)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(DELIVERABLES_FILE, 'utf8'));
+      console.log(`📂 Loaded ${data.length} deliverables from disk`);
+      return new Map(data.map(d => [d.id, d]));
+    } catch (e) {
+      console.error('⚠️ Failed to load deliverables:', e.message);
+    }
+  }
+  return new Map();
+}
+
+function saveDeliverables() {
+  ensureDataDir();
+  try {
+    const data = Array.from(deliverables.values());
+    fs.writeFileSync(DELIVERABLES_FILE, JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.error('⚠️ Failed to save deliverables:', e.message);
+  }
+}
+
+// Initialize from disk
+const handoffs = loadHandoffs();
+const deliverables = loadDeliverables();
+
+function normalizePathInput(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed ? path.resolve(trimmed) : null;
+}
+
+function deriveWorkdir(targetPath) {
+  if (!targetPath) return null;
+
+  try {
+    if (fs.existsSync(targetPath) && fs.statSync(targetPath).isDirectory()) {
+      return targetPath;
+    }
+  } catch (error) {
+    console.warn(`⚠️ Unable to inspect target path ${targetPath}: ${error.message}`);
+  }
+
+  return path.dirname(targetPath);
+}
+
+function isMarketingAgent(agentId) {
+  return MARKETING_AGENT_IDS.has(agentId);
+}
+
+function isBuildAgent(agentId) {
+  return BUILD_AGENT_IDS.has(agentId);
+}
+
+function getOutputRootForAgent(agentId) {
+  if (isMarketingAgent(agentId)) return MARKETING_OUTPUT_ROOT;
+  if (isBuildAgent(agentId)) return BUILDS_OUTPUT_ROOT;
+  return DEFAULT_OUTPUT_DIR;
+}
+
+function getArtifactOutputPath({ handoffId, pipelineId, agentId }) {
+  const rootDir = getOutputRootForAgent(agentId);
+  return pipelineId
+    ? path.join(rootDir, 'pipelines', pipelineId)
+    : path.join(rootDir, 'handoffs', handoffId);
+}
+
+function normalizeExecutionTarget(input = {}, fallback = {}) {
+  const explicitTargetPath = normalizePathInput(input.targetPath);
+  const explicitWorkdir = normalizePathInput(input.workdir);
+  const requestedMode = input.workMode;
+  const hasExplicitTarget = Boolean(explicitTargetPath || explicitWorkdir);
+
+  let workMode = requestedMode;
+  if (workMode !== WORK_MODE_ARTIFACT && workMode !== WORK_MODE_IN_PLACE) {
+    workMode = hasExplicitTarget ? WORK_MODE_IN_PLACE : WORK_MODE_ARTIFACT;
+  }
+
+  const artifactPath = getArtifactOutputPath({
+    handoffId: fallback.handoffId || input.id || 'adhoc',
+    pipelineId: fallback.pipelineId || input.pipelineId || null,
+    agentId: fallback.toAgent || input.toAgent || input.agentId || null,
+  });
+
+  if (workMode === WORK_MODE_IN_PLACE) {
+    const targetPath = explicitTargetPath || explicitWorkdir;
+    const workdir = explicitWorkdir || deriveWorkdir(explicitTargetPath) || artifactPath;
+    return { workMode, targetPath, workdir, artifactPath };
+  }
+
+  return {
+    workMode,
+    targetPath: artifactPath,
+    workdir: artifactPath,
+    artifactPath,
+  };
+}
+
+function validateExecutionTargetInput(input = {}) {
+  const targetPath = normalizePathInput(input.targetPath);
+  const workdir = normalizePathInput(input.workdir);
+  const hasExplicitTarget = Boolean(targetPath || workdir);
+
+  if (input.workMode && ![WORK_MODE_ARTIFACT, WORK_MODE_IN_PLACE].includes(input.workMode)) {
+    return `workMode must be "${WORK_MODE_ARTIFACT}" or "${WORK_MODE_IN_PLACE}"`;
+  }
+
+  if (input.workMode === WORK_MODE_IN_PLACE && !hasExplicitTarget) {
+    return 'targetPath or workdir is required when workMode is "in_place"';
+  }
+
+  if (!hasExplicitTarget) {
+    return null;
+  }
+
+  if (workdir) {
+    if (!fs.existsSync(workdir)) {
+      return `workdir does not exist: ${workdir}`;
+    }
+    if (!fs.statSync(workdir).isDirectory()) {
+      return `workdir must be a directory: ${workdir}`;
+    }
+  }
+
+  const effectiveWorkdir = workdir || deriveWorkdir(targetPath);
+  if (!effectiveWorkdir || !fs.existsSync(effectiveWorkdir)) {
+    return `target path is not accessible from this server: ${targetPath || workdir}`;
+  }
+  if (!fs.statSync(effectiveWorkdir).isDirectory()) {
+    return `resolved workdir must be a directory: ${effectiveWorkdir}`;
+  }
+
+  return null;
+}
+
+function ensureExecutionFilesystemTarget(executionTarget) {
+  if (!executionTarget || executionTarget.workMode !== WORK_MODE_ARTIFACT) return;
+  if (!fs.existsSync(executionTarget.workdir)) {
+    fs.mkdirSync(executionTarget.workdir, { recursive: true });
+  }
+}
+
+function getArtifactSearchPaths(handoff) {
+  const executionTarget = handoff.executionTarget || normalizeExecutionTarget(handoff, handoff);
+  const rootDir = getOutputRootForAgent(handoff.toAgent);
+  const paths = [
+    executionTarget.artifactPath,
+    handoff.pipelineId ? path.join(rootDir, 'pipelines', handoff.pipelineId) : null,
+    path.join(rootDir, 'handoffs', handoff.id),
+    path.join(rootDir, 'agents', handoff.toAgent, handoff.id),
+    path.join(process.cwd(), 'output', handoff.id),
+    path.join('/Users/king-lewie/.openclaw/workspace', handoff.pipelineId || handoff.id)
+  ].filter(Boolean);
+
+  return [...new Set(paths)];
+}
+
+// ==================== MARKETING HUB STORES ====================
+const brands = new Map();
+const competitors = new Map();
+const marketingRequests = new Map();
+// const deliverables = new Map(); // Now loaded from data/deliverables.json
+const marketingActivity = [];
+
+// Agent mapping for marketing request types
+const MARKETING_AGENTS = {
+  'seo': 'seo-specialist',
+  'ad-campaign': 'ad-creator',
+  'email': 'email-marketer',
+  'social': 'social-manager',
+  'competitor': 'prism',
+  'content': 'content-writer',
+  'custom': 'pixel'
+};
+
+function extractCleanContent(agentResponse, requestType) {
+  if (!agentResponse) return '';
+  
+  // Try to parse JSON responses
+  try {
+    const parsed = JSON.parse(agentResponse);
+    
+    // Handle nested OpenClaw result payloads
+    if (parsed.result?.payloads && Array.isArray(parsed.result.payloads)) {
+      const texts = parsed.result.payloads
+        .filter(p => p.text)
+        .map(p => p.text)
+        .join('\n\n');
+      if (texts) return texts;
+    }
+
+    // Handle common payload structures
+    if (parsed.payloads && Array.isArray(parsed.payloads)) {
+      const texts = parsed.payloads
+        .filter(p => p.text)
+        .map(p => p.text)
+        .join('\n\n');
+      if (texts) return texts;
+    }
+    
+    // Handle direct text field
+    if (parsed.text) return parsed.text;
+    if (parsed.result?.text) return parsed.result.text;
+    if (parsed.message) return parsed.message;
+    if (parsed.result?.message) return parsed.result.message;
+    
+    // Handle error objects
+    if (parsed.error) return `Error: ${parsed.error}`;
+    
+    // Return stringified for other structures
+    return JSON.stringify(parsed, null, 2);
+  } catch (e) {
+    // Not JSON - clean up the text response
+    let cleaned = agentResponse;
+    
+    // Remove common wrapper prefixes
+    cleaned = cleaned.replace(/^```json\n?/, '').replace(/^```\n?/, '').replace(/\n?```$/, '');
+    
+    // Truncate excessively long responses
+    if (cleaned.length > 10000) {
+      cleaned = cleaned.substring(0, 10000) + '\n\n[... truncated ...]';
+    }
+    
+    return cleaned;
+  }
+}
+
+function syncMarketingRequest(request) {
+  if (!request || !request.handoffId) return request;
+  const handoff = handoffs.get(request.handoffId);
+  if (!handoff) return request;
+
+  if (handoff.status && request.status !== handoff.status) {
+    request.status = handoff.status;
+    request.updatedAt = new Date().toISOString();
+  }
+
+  if (handoff.status === 'completed' && !request.deliverableId) {
+    const cleanContent = extractCleanContent(handoff.agentResponse, request.type);
+    
+    // FALLBACK: If agent didn't write files, save their response to the output folder
+    const execTarget = handoff.executionTarget || {};
+    const outputPath = execTarget.artifactPath || execTarget.workdir;
+    let filePath = null;
+    
+    if (outputPath && cleanContent) {
+      try {
+        if (!fs.existsSync(outputPath)) {
+          fs.mkdirSync(outputPath, { recursive: true });
+        }
+        const fileName = `${request.type}-deliverable.md`;
+        filePath = path.join(outputPath, fileName);
+        fs.writeFileSync(filePath, cleanContent);
+        console.log(`📝 Auto-saved deliverable to: ${filePath}`);
+      } catch (e) {
+        console.warn(`⚠️ Failed to save deliverable file: ${e.message}`);
+      }
+    }
+    
+    const deliverableId = `deliverable_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const deliverable = {
+      id: deliverableId,
+      requestId: request.id,
+      name: `${request.type} deliverable`,
+      type: request.type,
+      url: filePath || '',
+      content: cleanContent || handoff.task || '',
+      notes: filePath ? `Auto-saved from handoff ${handoff.id}` : `Auto-created from handoff ${handoff.id}`,
+      status: 'pending_review',
+      createdAt: new Date().toISOString()
+    };
+    deliverables.set(deliverableId, deliverable);
+    // P0: Persist state
+    saveDeliverables();
+    request.deliverableId = deliverableId;
+    request.updatedAt = new Date().toISOString();
+    addMarketingActivity('created', 'deliverable', deliverableId, { name: deliverable.name, requestId: request.id });
+  }
+
+  marketingRequests.set(request.id, request);
+  return request;
+}
+
+// Seed default brands
+brands.set('brand_1', {
+  id: 'brand_1',
+  name: 'UNT',
+  logo: '',
+  colors: { primary: '#3b82f6', secondary: '#1e40af' },
+  fonts: { primary: 'Inter' },
+  tone: 'Professional',
+  audience: 'Tax professionals',
+  styleGuideLinks: [],
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString()
+});
+brands.set('brand_2', {
+  id: 'brand_2',
+  name: "Buddha's Hawaiian Bakery",
+  logo: '',
+  colors: { primary: '#f59e0b', secondary: '#d97706' },
+  fonts: { primary: 'Poppins' },
+  tone: 'Warm, inviting',
+  audience: 'Local community',
+  styleGuideLinks: [],
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString()
+});
+brands.set('brand_3', {
+  id: 'brand_3',
+  name: 'Chromapages',
+  logo: '',
+  colors: { primary: '#8b5cf6', secondary: '#6366f1' },
+  fonts: { primary: 'Inter' },
+  tone: 'Modern, tech-forward',
+  audience: 'Businesses needing web apps',
+  styleGuideLinks: [],
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString()
+});
+
+// ==================== END MARKETING HUB STORES ====================
+
+// ==================== MEMORY LAYERS ====================
+// 3-layer distilled memory system: inbox → working → project
+
+const MEMORY_FILE = path.join(__dirname, 'data', 'memory.json');
+
+// Load memory on startup
+function loadMemory() {
+  try {
+    const dataDir = path.join(__dirname, 'data');
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+    
+    if (fs.existsSync(MEMORY_FILE)) {
+      const data = JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf8'));
+      memoryLayers.inbox = data.inbox || [];
+      memoryLayers.working = data.working || [];
+      memoryLayers.project = data.project || [];
+      console.log(`🧠 Loaded memory: ${memoryLayers.inbox.length} inbox, ${memoryLayers.working.length} working, ${memoryLayers.project.length} project`);
+    }
+  } catch (e) {
+    console.log('🧠 No existing memory file, starting fresh');
+  }
+}
+
+// Save memory to file
+function saveMemory() {
+  try {
+    const dataDir = path.join(__dirname, 'data');
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(MEMORY_FILE, JSON.stringify(memoryLayers, null, 2));
+  } catch (e) {
+    console.error('❌ Failed to save memory:', e.message);
+  }
+}
+
+const memoryLayers = {
+  inbox: [],    // New incoming context/facts (transient)
+  working: [],  // Active context being processed (session-bound)
+  project: []   // Distilled persistent memory (long-term)
+};
+
+// Memory item schema
+function createMemoryItem(type, content, source, tags = []) {
+  return {
+    id: `mem_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+    type, // 'fact' | 'decision' | 'insight' | 'task' | 'learned'
+    content,
+    source, // agent or system
+    tags,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    accessedAt: new Date().toISOString(),
+    accessCount: 0
+  };
+}
+
+// Auto-distill: move from inbox → working → project
+function distillMemory() {
+  const now = Date.now();
+  
+  // Move items from inbox to working after 5 minutes
+  memoryLayers.inbox = memoryLayers.inbox.filter(item => {
+    const age = now - new Date(item.createdAt).getTime();
+    if (age > 5 * 60 * 1000 && item.type !== 'learned') {
+      item.updatedAt = new Date().toISOString();
+      memoryLayers.working.push(item);
+      return false;
+    }
+    return true;
+  });
+  
+  // Move items from working to project after 30 minutes (distilled)
+  memoryLayers.working = memoryLayers.working.filter(item => {
+    const age = now - new Date(item.createdAt).getTime();
+    if (age > 30 * 60 * 1000) {
+      item.updatedAt = new Date().toISOString();
+      // Deduplicate before adding to project
+      const exists = memoryLayers.project.some(p => p.content === item.content && p.type === item.type);
+      if (!exists) {
+        memoryLayers.project.push(item);
+      }
+      return false;
+    }
+    return true;
+  });
+  
+  // Keep project memory bounded (last 100 items)
+  if (memoryLayers.project.length > 100) {
+    memoryLayers.project = memoryLayers.project.slice(-100);
+  }
+  
+  saveMemory();
+}
+
+// Run distillation every minute
+setInterval(distillMemory, 60000);
+
+// Initialize memory on startup
+loadMemory();
+
+// ==================== END MEMORY LAYERS ====================
+
 let startTime = Date.now();
 
 // ==================== FEATURE 1: PERSISTENT SCHEDULING ====================
@@ -82,6 +576,18 @@ function loadSchedules() {
         scheduleJob(job);
       });
       console.log(`📅 Loaded ${scheduledJobs.size} scheduled jobs`);
+      
+      // Initialize scheduledAt for cron jobs that don't have one
+      scheduledJobs.forEach((job, id) => {
+        if (job.cron && !job.scheduledAt) {
+          const nextRun = getNextCronRun(job.cron);
+          if (nextRun) {
+            job.scheduledAt = nextRun;
+            scheduleJob(job);
+            console.log(`📅 Rescheduled ${job.name}: ${nextRun}`);
+          }
+        }
+      });
     }
   } catch (e) {
     console.error('Failed to load schedules:', e.message);
@@ -428,10 +934,34 @@ function initTemplates() {
       { from: 'flux', to: 'chroma', task: 'Post prototype to #app-prototype-builder: {task}', context: '{context}' }
     ]
   });
+
+  // Critic templates
+  templates.set('critic-review', {
+    name: 'Critic Review: Challenge this idea',
+    steps: [
+      { from: 'chroma', to: 'critic', task: 'Review and challenge: {task}', context: '{context}' }
+    ]
+  });
+
+  templates.set('code-critic', {
+    name: 'Code Review with Critic',
+    steps: [
+      { from: 'bender', to: 'critic', task: 'Review this code/decision: {task}', context: '{context}' }
+    ]
+  });
+
+  templates.set('stress-test', {
+    name: 'Stress Test: Run idea through Critic',
+    steps: [
+      { from: 'chroma', to: 'critic', task: 'Stress test this plan: {task}', context: '{context}' },
+      { from: 'critic', to: 'chroma', task: 'Critique complete: {task}', context: '{context}' }
+    ]
+  });
 }
 initTemplates();
 
 // CORS - Allow all origins for production (Vercel deployments)
+app.use(compression());
 app.use(cors({
   origin: true, // Allow all origins
   credentials: true,
@@ -439,6 +969,19 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
+
+// CRM (ChromaBase Firestore-backed)
+app.use('/api/crm', crmRouter);
+
+// Agent-CRM bridge: context for agents
+app.get('/api/crm-context', async (req, res) => {
+  try {
+    const data = await crmRouter.getCrmContext();
+    res.json({ status: 'success', data });
+  } catch (e) {
+    res.status(503).json({ status: 'error', message: e.message || 'CRM unavailable' });
+  }
+});
 
 // ==================== RATE LIMITING ====================
 // Simple in-memory rate limiter
@@ -512,6 +1055,8 @@ async function retryHandoff(handoff) {
     handoff.status = 'failed';
     handoff.error = `Failed after ${maxAttempts} attempts`;
     triggerWebhooks('HandoffFailed', handoff);
+    // P0: Persist state
+    saveHandoffs();
     return;
   }
 
@@ -764,8 +1309,96 @@ async function postCompetitorResults(handoff) {
   }
 }
 
+// ── PWA: Service Worker and Manifest headers ──────────────────────────────
+// sw.js must be served with no-cache and the correct SW scope header
+app.get('/sw.js', (req, res) => {
+  res.setHeader('Service-Worker-Allowed', '/');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+  res.sendFile(path.join(__dirname, 'public', 'sw.js'));
+});
+
+// manifest.json: short cache, correct MIME type
+app.get('/manifest.json', (req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=86400'); // 1 day
+  res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+  res.sendFile(path.join(__dirname, 'public', 'manifest.json'));
+});
+
+// offline fallback page
+app.get('/offline', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'offline.html'));
+});
+
+// Page routes — must be before express.static so /crm, /dashboard, etc. are matched first
+app.get('/dashboard', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
+});
+app.get('/agents', (req, res) => {
+  const f = path.join(__dirname, 'public', 'agents.html');
+  if (fs.existsSync(f)) return res.sendFile(f);
+  res.redirect('/dashboard');
+});
+app.get('/approvals', (req, res) => {
+  const f = path.join(__dirname, 'public', 'approvals.html');
+  if (fs.existsSync(f)) return res.sendFile(f);
+  res.redirect('/dashboard');
+});
+app.get('/client', (req, res) => {
+  const f = path.join(__dirname, 'public', 'client.html');
+  if (fs.existsSync(f)) return res.sendFile(f);
+  res.redirect('/dashboard');
+});
+app.get('/pipelines', (req, res) => {
+  const f = path.join(__dirname, 'public', 'pipelines.html');
+  if (fs.existsSync(f)) return res.sendFile(f);
+  res.redirect('/dashboard');
+});
+app.get('/logs', (req, res) => {
+  const f = path.join(__dirname, 'public', 'logs.html');
+  if (fs.existsSync(f)) return res.sendFile(f);
+  res.redirect('/dashboard');
+});
+app.get('/settings', (req, res) => {
+  const f = path.join(__dirname, 'public', 'settings.html');
+  if (fs.existsSync(f)) return res.sendFile(f);
+  res.redirect('/dashboard');
+});
+app.get('/office', (req, res) => {
+  const f = path.join(__dirname, 'public', 'office.html');
+  if (fs.existsSync(f)) return res.sendFile(f);
+  res.redirect('/dashboard');
+});
+app.get('/crm', (req, res) => {
+  const f = path.join(__dirname, 'public', 'crm.html');
+  if (fs.existsSync(f)) return res.sendFile(f);
+  res.redirect('/dashboard');
+});
+app.get('/marketing', (req, res) => {
+  const f = path.join(__dirname, 'public', 'marketing.html');
+  if (fs.existsSync(f)) return res.sendFile(f);
+  res.redirect('/dashboard');
+});
+
+app.get('/tasks', (req, res) => {
+  const f = path.join(__dirname, 'public', 'tasks.html');
+  if (fs.existsSync(f)) return res.sendFile(f);
+  res.redirect('/dashboard');
+});
+
 // Serve static files from public directory
-app.use(express.static('public'));
+app.use(express.static('public', {
+  setHeaders: (res, filePath) => {
+    // SVG icons: allow cross-origin for PWA
+    if (filePath.endsWith('.svg')) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    // Screenshots: long cache
+    if (filePath.includes('/screenshots/')) {
+      res.setHeader('Cache-Control', 'public, max-age=2592000'); // 30 days
+    }
+  }
+}));
 
 // API Documentation page
 app.get('/api/docs', (req, res) => {
@@ -859,6 +1492,240 @@ app.get('/api/agents/:id/status', (req, res) => {
   });
 });
 
+// ==================== HEARTBEAT AWARENESS ====================
+// Detect stale, blocked, overdue, idle, needs-context states
+
+const HEALTH_THRESHOLDS = {
+  staleMs: 5 * 60 * 1000,      // 5 minutes without update = stale
+  blockedMs: 15 * 60 * 1000,  // 15 minutes in_progress = potentially blocked
+  overdueMs: 30 * 60 * 1000,  // 30 minutes past SLA = overdue
+  idleMs: 60 * 60 * 1000      // 60 minutes no activity = idle
+};
+
+function computeAgentHealth(agentId) {
+  const agentHandoffs = Array.from(handoffs.values()).filter(h => h.toAgent === agentId);
+  const now = Date.now();
+  
+  const states = {
+    pending: agentHandoffs.filter(h => h.status === 'pending'),
+    inProgress: agentHandoffs.filter(h => h.status === 'in_progress'),
+    completed: agentHandoffs.filter(h => h.status === 'completed'),
+    failed: agentHandoffs.filter(h => h.status === 'failed')
+  };
+  
+  // Check for stale handoffs (no update in 5 min)
+  const stale = states.inProgress.filter(h => {
+    const lastUpdate = h.startedAt ? new Date(h.startedAt).getTime() : new Date(h.createdAt).getTime();
+    return now - lastUpdate > HEALTH_THRESHOLDS.staleMs;
+  });
+  
+  // Check for blocked handoffs (in progress > 15 min)
+  const blocked = states.inProgress.filter(h => {
+    const lastUpdate = h.startedAt ? new Date(h.startedAt).getTime() : new Date(h.createdAt).getTime();
+    return now - lastUpdate > HEALTH_THRESHOLDS.blockedMs;
+  });
+  
+  // Check for overdue (past SLA deadline)
+  const overdue = agentHandoffs.filter(h => h.slaDeadline && new Date(h.slaDeadline).getTime() < now && h.status !== 'completed');
+  
+  // Check for idle (no activity in 1 hour)
+  const lastActivity = agentHandoffs.reduce((latest, h) => {
+    const dates = [h.createdAt, h.startedAt, h.completedAt, h.responseAt].filter(Boolean);
+    const mostRecent = dates.sort((a, b) => new Date(b) - new Date(a))[0];
+    return mostRecent && (!latest || new Date(mostRecent) > new Date(latest)) ? mostRecent : latest;
+  }, null);
+  
+  const idle = lastActivity && (now - new Date(lastActivity).getTime() > HEALTH_THRESHOLDS.idleMs);
+  
+  // Check for needs-context (has pending but no context)
+  const needsContext = states.pending.filter(h => !h.context || h.context.length < 10);
+  
+  // Overall health score (0-100)
+  let healthScore = 100;
+  healthScore -= stale.length * 10;
+  healthScore -= blocked.length * 15;
+  healthScore -= overdue.length * 20;
+  if (idle) healthScore -= 15;
+  healthScore = Math.max(0, healthScore);
+  
+  // Determine overall status
+  let overallStatus = 'healthy';
+  if (overdue.length > 0) overallStatus = 'critical';
+  else if (blocked.length > 0) overallStatus = 'blocked';
+  else if (stale.length > 0) overallStatus = 'stale';
+  else if (idle) overallStatus = 'idle';
+  
+  return {
+    agent: agentId,
+    healthScore,
+    status: overallStatus,
+    timestamp: new Date().toISOString(),
+    counts: {
+      pending: states.pending.length,
+      inProgress: states.inProgress.length,
+      completed: states.completed.length,
+      failed: states.failed.length
+    },
+    alerts: {
+      stale: stale.map(h => ({ id: h.id, task: h.task?.substring(0, 50), startedAt: h.startedAt })),
+      blocked: blocked.map(h => ({ id: h.id, task: h.task?.substring(0, 50), startedAt: h.startedAt })),
+      overdue: overdue.map(h => ({ id: h.id, task: h.task?.substring(0, 50), slaDeadline: h.slaDeadline })),
+      idle,
+      needsContext: needsContext.map(h => ({ id: h.id, task: h.task?.substring(0, 50) }))
+    },
+    lastActivity
+  };
+}
+
+app.get('/api/agents/:id/health', (req, res) => {
+  const { id } = req.params;
+  const agent = config.agents[id];
+  if (!agent) return res.status(404).json({ error: 'Agent not found' });
+  
+  const health = computeAgentHealth(id);
+  res.json(health);
+});
+
+app.get('/api/agents/health', (req, res) => {
+  const allHealth = Object.keys(config.agents).map(agentId => ({
+    agentId,
+    ...computeAgentHealth(agentId)
+  }));
+  
+  // Summary
+  const summary = {
+    totalAgents: allHealth.length,
+    healthy: allHealth.filter(h => h.status === 'healthy').length,
+    stale: allHealth.filter(h => h.status === 'stale').length,
+    blocked: allHealth.filter(h => h.status === 'blocked').length,
+    critical: allHealth.filter(h => h.status === 'critical').length,
+    idle: allHealth.filter(h => h.status === 'idle').length,
+    avgHealthScore: Math.round(allHealth.reduce((sum, h) => sum + h.healthScore, 0) / allHealth.length)
+  };
+  
+  res.json({ agents: allHealth, summary });
+});
+
+// ==================== AGENT ACTIVITY & PIPELINE HEALTH ====================
+
+// Get active handoffs (in_progress) - shows what's running right now
+app.get('/api/agents/activity', (req, res) => {
+  const { client } = req.query;
+  let activeHandoffs = Array.from(handoffs.values())
+    .filter(h => h.status === 'in_progress' || h.status === 'pending');
+  
+  if (client) {
+    activeHandoffs = activeHandoffs.filter(h => h.client === client);
+  }
+  
+  // Group by agent
+  const byAgent = {};
+  activeHandoffs.forEach(h => {
+    if (!byAgent[h.toAgent]) {
+      byAgent[h.toAgent] = [];
+    }
+    byAgent[h.toAgent].push({
+      id: h.id,
+      task: h.task,
+      status: h.status,
+      client: h.client,
+      createdAt: h.createdAt,
+      startedAt: h.startedAt
+    });
+  });
+  
+  res.json({ 
+    activeCount: activeHandoffs.length,
+    byAgent,
+    handoffs: activeHandoffs.map(h => ({
+      id: h.id,
+      fromAgent: h.fromAgent,
+      toAgent: h.toAgent,
+      task: h.task,
+      status: h.status,
+      client: h.client,
+      createdAt: h.createdAt,
+      startedAt: h.startedAt
+    }))
+  });
+});
+
+// Pipeline health - counts by status, optionally by client
+app.get('/api/health/pipeline', (req, res) => {
+  const { client } = req.query;
+  let allHandoffs = Array.from(handoffs.values());
+  
+  if (client) {
+    allHandoffs = allHandoffs.filter(h => h.client === client);
+  }
+  
+  // Count by status
+  const byStatus = {
+    pending: allHandoffs.filter(h => h.status === 'pending').length,
+    in_progress: allHandoffs.filter(h => h.status === 'in_progress').length,
+    completed: allHandoffs.filter(h => h.status === 'completed').length,
+    failed: allHandoffs.filter(h => h.status === 'failed').length,
+    blocked: allHandoffs.filter(h => h.status === 'blocked').length
+  };
+  
+  // Count by client
+  const byClient = {};
+  allHandoffs.forEach(h => {
+    const c = h.client || 'unassigned';
+    if (!byClient[c]) {
+      byClient[c] = { total: 0, pending: 0, in_progress: 0, completed: 0, failed: 0 };
+    }
+    byClient[c].total++;
+    if (byStatus[h.status] !== undefined) {
+      byClient[c][h.status]++;
+    }
+  });
+  
+  // Today's stats
+  const today = new Date().toISOString().split('T')[0];
+  const todayHandoffs = allHandoffs.filter(h => h.createdAt.startsWith(today));
+  const todayCompleted = todayHandoffs.filter(h => h.status === 'completed').length;
+  
+  res.json({
+    byStatus,
+    byClient,
+    today: {
+      total: todayHandoffs.length,
+      completed: todayCompleted,
+      pending: todayHandoffs.filter(h => h.status === 'pending').length,
+      failed: todayHandoffs.filter(h => h.status === 'failed').length
+    }
+  });
+});
+
+// Get clients list
+app.get('/api/clients', (req, res) => {
+  const allHandoffs = Array.from(handoffs.values());
+  const allTasks = loadTasks().tasks;
+  
+  // Extract unique clients from handoffs and tasks
+  const clientSet = new Set();
+  allHandoffs.forEach(h => {
+    if (h.client) clientSet.add(h.client);
+  });
+  allTasks.forEach(t => {
+    if (t.client) clientSet.add(t.client);
+  });
+  
+  const clients = Array.from(clientSet).sort().map(c => ({
+    id: c,
+    name: c.charAt(0).toUpperCase() + c.slice(1),
+    // Get stats for each client
+    handoffs: allHandoffs.filter(h => h.client === c).length,
+    tasks: allTasks.filter(t => t.client === c).length,
+    active: allHandoffs.filter(h => h.client === c && (h.status === 'in_progress' || h.status === 'pending')).length
+  }));
+  
+  res.json({ clients });
+});
+
+// ==================== END HEARTBEAT AWARENESS ====================
+
 // ==================== TEMPLATES ====================
 
 app.get('/api/templates', (req, res) => {
@@ -884,10 +1751,15 @@ app.post('/api/templates', (req, res) => {
 // Execute a template as a sequential pipeline (waits for each step to complete)
 app.post('/api/template/:name/execute', async (req, res) => {
   const { name } = req.params;
-  const { task, context, priority, runAsync = false } = req.body;
+  const { task, context, priority, runAsync = false, targetPath, workdir, workMode } = req.body;
   const template = templates.get(name);
 
   if (!template) return res.status(404).json({ error: 'Template not found' });
+
+  const executionTargetError = validateExecutionTargetInput({ targetPath, workdir, workMode });
+  if (executionTargetError) {
+    return res.status(400).json({ error: executionTargetError });
+  }
 
   const pipelineId = `pipeline_${Date.now()}`;
   const results = [];
@@ -899,10 +1771,13 @@ app.post('/api/template/:name/execute', async (req, res) => {
       const resolvedTask = step.task.replace('{task}', task || '');
       const resolvedContext = step.context ? step.context.replace('{context}', context || '') : context;
 
-      const result = await createHandoff(step.from, step.to, resolvedTask, resolvedContext, priority, {
+      const result = await createHandoff(step.from, step.to, resolvedTask, resolvedContext, [], [], priority, {
         pipelineId,
         pipelineStep: i + 1,
-        pipelineTotalSteps: template.steps.length
+        pipelineTotalSteps: template.steps.length,
+        targetPath,
+        workdir,
+        workMode,
       });
       results.push(result);
     }
@@ -919,11 +1794,14 @@ app.post('/api/template/:name/execute', async (req, res) => {
         : currentContext;
 
       // Create and wait for this handoff
-      const result = await createHandoff(step.from, step.to, resolvedTask, resolvedContext, priority, {
+      const result = await createHandoff(step.from, step.to, resolvedTask, resolvedContext, [], [], priority, {
         pipelineId,
         pipelineStep: i + 1,
         pipelineTotalSteps: template.steps.length,
-        waitForComplete: true
+        waitForComplete: true,
+        targetPath,
+        workdir,
+        workMode,
       });
       results.push(result);
 
@@ -950,6 +1828,22 @@ app.post('/api/template/:name/execute', async (req, res) => {
 function createHandoff(fromAgent, toAgent, task, context = '', decisions = [], nextSteps = [], priority = 'medium', options = {}) {
   return new Promise((resolve) => {
     const handoffId = `handoff_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const executionTarget = normalizeExecutionTarget(options, {
+      handoffId,
+      pipelineId: options.pipelineId || null,
+      toAgent,
+    });
+    const handoffOptions = { ...options };
+    delete handoffOptions.targetPath;
+    delete handoffOptions.workdir;
+    delete handoffOptions.workMode;
+    delete handoffOptions.executionTarget;
+
+    // If contextPacketId provided, attach the context packet
+    let contextPacket = null;
+    if (handoffOptions.contextPacketId) {
+      contextPacket = contextPackets.get(handoffOptions.contextPacketId);
+    }
 
     const handoff = {
       id: handoffId,
@@ -959,19 +1853,32 @@ function createHandoff(fromAgent, toAgent, task, context = '', decisions = [], n
       context: context || '',
       decisions: decisions || [],
       nextSteps: nextSteps || [],
+      contextPacketId: handoffOptions.contextPacketId || null,
+      contextPacket: contextPacket ? {
+        id: contextPacket.id,
+        facts: contextPacket.facts,
+        constraints: contextPacket.constraints,
+        decisions: contextPacket.decisions,
+        artifacts: contextPacket.artifacts,
+        nextSteps: contextPacket.nextSteps
+      } : null,
       priority: priority === 'urgent' ? 'urgent' : priority,
       status: 'pending',
       createdAt: new Date().toISOString(),
       startedAt: null,
       completedAt: null,
-      slaDeadline: options.slaMinutes ? new Date(Date.now() + options.slaMinutes * 60000).toISOString() : null,
-      escalationLevel: options.escalationLevel || 0,
-      dependsOn: options.dependsOn || [], // Dependency chain support
+      slaDeadline: handoffOptions.slaMinutes ? new Date(Date.now() + handoffOptions.slaMinutes * 60000).toISOString() : null,
+      escalationLevel: handoffOptions.escalationLevel || 0,
+      dependsOn: handoffOptions.dependsOn || [], // Dependency chain support
       retryCount: 0,
-      ...options
+      executionTarget,
+      client: handoffOptions.client || null,  // Client association
+      ...handoffOptions
     };
 
     handoffs.set(handoffId, handoff);
+    // P0: Persist state
+    saveHandoffs();
 
     // Register dependencies if any
     if (handoff.dependsOn && handoff.dependsOn.length > 0) {
@@ -1005,10 +1912,15 @@ function createHandoff(fromAgent, toAgent, task, context = '', decisions = [], n
 // API: Create handoff with dependencies
 app.post('/api/handoff/with-dependencies', async (req, res) => {
   try {
-    const { fromAgent, toAgent, task, context, dependsOn } = req.body;
+    const { fromAgent, toAgent, task, context, dependsOn, targetPath, workdir, workMode } = req.body;
 
     if (!fromAgent || !toAgent || !task) {
       return res.status(400).json({ error: 'fromAgent, toAgent, and task required' });
+    }
+
+    const executionTargetError = validateExecutionTargetInput({ targetPath, workdir, workMode });
+    if (executionTargetError) {
+      return res.status(400).json({ error: executionTargetError });
     }
 
     // Validate dependencies exist
@@ -1020,7 +1932,12 @@ app.post('/api/handoff/with-dependencies', async (req, res) => {
       }
     }
 
-    const result = await createHandoff(fromAgent, toAgent, task, context, [], [], 'medium', { dependsOn });
+    const result = await createHandoff(fromAgent, toAgent, task, context, [], [], 'medium', {
+      dependsOn,
+      targetPath,
+      workdir,
+      workMode,
+    });
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1082,6 +1999,7 @@ app.get('/api/metrics', (req, res) => {
 
   res.json({
     total: all.length,
+    uptime: Math.floor((Date.now() - startTime) / 1000),
     lastHour: lastHour.length,
     lastDay: lastDay.length,
     byStatus: {
@@ -1099,19 +2017,83 @@ app.get('/api/metrics', (req, res) => {
     ),
     avgCompletionTime: all.filter(h => h.completedAt && h.startedAt).reduce((sum, h) => {
       return sum + (new Date(h.completedAt) - new Date(h.startedAt));
-    }, 0) / (all.filter(h => h.completedAt && h.startedAt).length || 1)
+    }, 0) / (all.filter(h => h.completedAt && h.startedAt).length || 1),
+    config: {
+      rateLimit: config.rateLimit,
+      retry: config.retry,
+      storage: config.storage,
+      agentTimeouts: config.agentTimeouts,
+      discord: { webhookUrl: config.discord?.webhookUrl ? '[configured]' : null }
+    }
   });
+});
+
+// ==================== SYSTEM INFO ====================
+
+app.get('/api/system', (req, res) => {
+  const uptimeSec = Math.floor((Date.now() - startTime) / 1000);
+  const all = Array.from(handoffs.values());
+  res.json({
+    uptime: uptimeSec,
+    version: '3.0.0',
+    status: 'operational',
+    handoffCount: all.length,
+    scheduledJobCount: scheduledJobs.size,
+    webhookCount: webhooks.size,
+    automationCount: automations.size,
+    config: {
+      rateLimit: config.rateLimit,
+      retry: config.retry,
+      storage: config.storage,
+      agentTimeouts: config.agentTimeouts,
+      discord: { configured: !!(config.discord?.webhookUrl) }
+    }
+  });
+});
+
+// ==================== AGENT RELEASE ====================
+
+app.post('/api/agent/:agentId/release', (req, res) => {
+  const { agentId } = req.params;
+  if (!config.agents[agentId]) {
+    return res.status(404).json({ error: 'Agent not found' });
+  }
+  // Cancel all in-progress handoffs for this agent
+  let released = 0;
+  for (const [id, h] of handoffs.entries()) {
+    if (h.toAgent === agentId && h.status === 'in_progress') {
+      h.status = 'cancelled';
+      h.cancelledAt = new Date().toISOString();
+      h.cancelReason = 'Manual release by operator';
+      released++;
+    }
+  }
+  res.json({ success: true, agent: agentId, released });
 });
 
 app.post('/api/handoff', async (req, res) => {
   try {
-    const { fromAgent, toAgent, task, context, decisions, nextSteps, priority, slaMinutes } = req.body;
+    const { fromAgent, toAgent, task, context, decisions, nextSteps, priority, slaMinutes, targetPath, workdir, workMode, pipelineId, pipelineStep, pipelineTotalSteps, client } = req.body;
 
     if (!fromAgent || !toAgent) {
       return res.status(400).json({ error: 'fromAgent and toAgent required' });
     }
 
-    const result = await createHandoff(fromAgent, toAgent, task, context, decisions, nextSteps, priority, { slaMinutes });
+    const executionTargetError = validateExecutionTargetInput({ targetPath, workdir, workMode });
+    if (executionTargetError) {
+      return res.status(400).json({ error: executionTargetError });
+    }
+
+    const result = await createHandoff(fromAgent, toAgent, task, context, decisions, nextSteps, priority, {
+      slaMinutes,
+      targetPath,
+      workdir,
+      workMode,
+      pipelineId,
+      pipelineStep,
+      pipelineTotalSteps,
+      client,
+    });
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1122,10 +2104,15 @@ app.post('/api/handoff', async (req, res) => {
 
 app.post('/api/task/:agentId', async (req, res) => {
   const { agentId } = req.params;
-  const { task, context, priority, spawnSubAgent } = req.body;
+  const { task, context, priority, spawnSubAgent, targetPath, workdir, workMode } = req.body;
 
   if (!config.agents[agentId]) {
     return res.status(400).json({ error: `Unknown agent: ${agentId}` });
+  }
+
+  const executionTargetError = validateExecutionTargetInput({ targetPath, workdir, workMode });
+  if (executionTargetError) {
+    return res.status(400).json({ error: executionTargetError });
   }
 
   // FIX #1: Support spawning sub-agents (e.g., Bender spawning frontend-dev)
@@ -1139,10 +2126,19 @@ app.post('/api/task/:agentId', async (req, res) => {
 
     // Create handoff to parent first, with instruction to spawn sub-agent
     const subAgentTask = `${task}\n\n🤖 SPAWN SUB-AGENT: Please spawn '${spawnSubAgent}' to handle this task.`;
-    const result = await createHandoff('chroma', agentId, subAgentTask, context, [], [], priority || 'medium', { spawnSubAgent });
+    const result = await createHandoff('chroma', agentId, subAgentTask, context, [], [], priority || 'medium', {
+      spawnSubAgent,
+      targetPath,
+      workdir,
+      workMode,
+    });
     res.json({ success: true, ...result, spawnedSubAgent: spawnSubAgent });
   } else {
-    const result = await createHandoff('chroma', agentId, task, context, [], [], priority || 'medium');
+    const result = await createHandoff('chroma', agentId, task, context, [], [], priority || 'medium', {
+      targetPath,
+      workdir,
+      workMode,
+    });
     res.json({ success: true, ...result });
   }
 });
@@ -1431,7 +2427,12 @@ app.post('/api/auto-assign', async (req, res) => {
 
 app.post('/api/pipeline', async (req, res) => {
   try {
-    let { name, steps, agents: agentChain, task, context, priority, sequential = false } = req.body;
+    let { name, steps, agents: agentChain, task, context, priority, sequential = false, targetPath, workdir, workMode } = req.body;
+
+    const executionTargetError = validateExecutionTargetInput({ targetPath, workdir, workMode });
+    if (executionTargetError) {
+      return res.status(400).json({ error: executionTargetError });
+    }
 
     // FIX: support both payload formats (steps[] or agents[])
     if (steps && Array.isArray(steps)) {
@@ -1449,6 +2450,15 @@ app.post('/api/pipeline', async (req, res) => {
       
       for (let i = 0; i < steps.length; i++) {
         const step = steps[i];
+        const stepExecutionTarget = {
+          targetPath: step.targetPath || targetPath,
+          workdir: step.workdir || workdir,
+          workMode: step.workMode || workMode,
+        };
+        const stepExecutionTargetError = validateExecutionTargetInput(stepExecutionTarget);
+        if (stepExecutionTargetError) {
+          return res.status(400).json({ error: `Invalid execution target for step ${i + 1}: ${stepExecutionTargetError}` });
+        }
         
         // Handle simple agentId format
         const from = step.from || previousAgent;
@@ -1479,23 +2489,74 @@ app.post('/api/pipeline', async (req, res) => {
             pipelineId,
             pipelineStep: i + 1,
             pipelineTotalSteps: steps.length,
-            waitForComplete: sequential
+            waitForComplete: sequential,
+            ...stepExecutionTarget,
           }
         );
         createdHandoffs.push(result.handoffId);
         
-        // If sequential, wait for completion and capture output
+        // If sequential, wait for completion with gating (max 60 seconds)
         if (sequential) {
-          console.log(`⏳ Pipeline ${pipelineId}: Waiting for step ${i + 1}/${steps.length}...`);
-          while (true) {
+          console.log(`⏳ Pipeline ${pipelineId}: Waiting for step ${i + 1}/${steps.length} to complete...`);
+          
+          let waitTime = 0;
+          const maxWait = 60000; // 60 seconds max
+          
+          // Wait for handoff to complete
+          while (waitTime < maxWait) {
             await new Promise(r => setTimeout(r, 3000));
+            waitTime += 3000;
             const h = handoffs.get(result.handoffId);
-            if (!h || h.status === 'completed' || h.status === 'failed') {
-              const output = h?.agentResponse || h?.result || '';
-              if (output) stepResults.push(output);
-              console.log(`✅ Step ${i + 1} complete: ${output.substring(0, 100)}...`);
+            if (!h || h.status === 'failed') {
+              console.log(`❌ Step ${i + 1} failed`);
               break;
             }
+            if (h.status === 'completed') {
+              // GATE: Wait for deliverable/file before proceeding (max 30s)
+              const execTarget = h.executionTarget || {};
+              const outputPath = execTarget.artifactPath || execTarget.workdir;
+              let hasDeliverable = false;
+              
+              if (outputPath && fs.existsSync(outputPath)) {
+                const files = fs.readdirSync(outputPath);
+                hasDeliverable = files.length > 0;
+                console.log(`📁 Step ${i + 1} output folder: ${outputPath}, files: ${files.length}`);
+              }
+              
+              // Also check for deliverable stub
+              const hasDeliverableStub = Array.from(marketingRequests.values()).some(r => r.handoffId === h.id && r.deliverableId);
+              
+              if (hasDeliverable || hasDeliverableStub) {
+                const output = h?.agentResponse || h?.result || '';
+                if (output) stepResults.push(output);
+                console.log(`✅ Step ${i + 1} complete with deliverable: ${output.substring(0, 100)}...`);
+                break;
+              } else {
+                // FALLBACK: No files written - save agent response as file
+                const agentResponse = h?.agentResponse || h?.result || '';
+                if (agentResponse && outputPath) {
+                  const saved = persistAgentResponseArtifact(outputPath, agentResponse, h.toAgent, `step-${i+1}-${h.toAgent}-output`);
+                  if (saved) {
+                    console.log(`📝 Step ${i + 1}: Auto-saved agent response as ${saved.fileName}`);
+                    stepResults.push(saved.cleanContent);
+                    break;
+                  }
+                }
+              }
+              
+              if (waitTime >= 30000) {
+                // After 30s, proceed anyway if status is completed
+                console.log(`⏳ Step ${i + 1} completed but no deliverable after 30s, proceeding...`);
+                const output = h?.agentResponse || h?.result || '';
+                if (output) stepResults.push(output);
+                break;
+              } else {
+                console.log(`⏳ Step ${i + 1} complete but no deliverable yet, waiting...`);
+              }
+            }
+          }
+          if (waitTime >= maxWait) {
+            console.log(`⚠️ Pipeline ${pipelineId}: Max wait time reached for step ${i + 1}, proceeding anyway`);
           }
         }
         
@@ -1582,6 +2643,9 @@ YOUR JOB (${to}): ${roleTasks[to] || 'continue the pipeline'}
         pipelineStep: stepNum,
         pipelineTotalSteps: totalSteps,
         pipelineAgents: agentChain,
+        targetPath,
+        workdir,
+        workMode,
       });
       results.push(result);
       await new Promise(r => setTimeout(r, 50));
@@ -1597,15 +2661,24 @@ YOUR JOB (${to}): ${roleTasks[to] || 'continue the pipeline'}
 // ==================== PARALLEL HANDOFFS ====================
 
 app.post('/api/parallel', async (req, res) => {
-  const { fromAgent, toAgents, task, context, priority } = req.body;
+  const { fromAgent, toAgents, task, context, priority, targetPath, workdir, workMode } = req.body;
 
   if (!Array.isArray(toAgents) || toAgents.length === 0) {
     return res.status(400).json({ error: 'toAgents must be an array' });
   }
 
+  const executionTargetError = validateExecutionTargetInput({ targetPath, workdir, workMode });
+  if (executionTargetError) {
+    return res.status(400).json({ error: executionTargetError });
+  }
+
   const results = [];
   for (const toAgent of toAgents) {
-    const result = await createHandoff(fromAgent, toAgent, task, context, [], [], priority);
+    const result = await createHandoff(fromAgent, toAgent, task, context, [], [], priority, {
+      targetPath,
+      workdir,
+      workMode,
+    });
     results.push(result);
   }
 
@@ -1851,9 +2924,28 @@ app.get('/api/history', (req, res) => {
 // ==================== HANDOFFS LIST ====================
 
 app.get('/api/handoffs', (req, res) => {
-  const allHandoffs = Array.from(handoffs.values()).sort(
+  const { client, status, fromAgent, toAgent } = req.query;
+  let allHandoffs = Array.from(handoffs.values()).sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
+  
+  // Filter by client
+  if (client) {
+    allHandoffs = allHandoffs.filter(h => h.client === client);
+  }
+  // Filter by status
+  if (status) {
+    allHandoffs = allHandoffs.filter(h => h.status === status);
+  }
+  // Filter by fromAgent
+  if (fromAgent) {
+    allHandoffs = allHandoffs.filter(h => h.fromAgent === fromAgent);
+  }
+  // Filter by toAgent
+  if (toAgent) {
+    allHandoffs = allHandoffs.filter(h => h.toAgent === toAgent);
+  }
+  
   res.json({ handoffs: allHandoffs });
 });
 
@@ -1871,6 +2963,233 @@ app.get('/api/context/:agentId', (req, res) => {
   });
 });
 
+// ==================== CONTEXT PACKETS API ====================
+// Explicit context sharing - structured packets for handoffs
+
+app.post('/api/context', (req, res) => {
+  const { 
+    facts = [], 
+    constraints = [], 
+    decisions = [], 
+    artifacts = [], 
+    nextSteps = [],
+    parentId // Optional: inherit from existing context
+  } = req.body;
+  
+  let history = [];
+  
+  // If parentId provided, inherit from parent context
+  if (parentId) {
+    const parent = contextPackets.get(parentId);
+    if (parent) {
+      history = [...parent.history, { 
+        from: parentId, 
+        at: new Date().toISOString(), 
+        action: 'inherited' 
+      }];
+    }
+  }
+  
+  const id = 'ctx_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+  const packet = {
+    id,
+    facts,
+    constraints,
+    decisions,
+    artifacts,
+    nextSteps,
+    history,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  
+  contextPackets.set(id, packet);
+  console.log(`📦 Created context packet: ${id}`);
+  
+  res.json({ success: true, context: packet });
+});
+
+app.get('/api/contexts', (req, res) => {
+  const all = Array.from(contextPackets.values()).map(c => ({
+    id: c.id,
+    facts: c.facts,
+    constraints: c.constraints,
+    decisions: c.decisions.length,
+    artifacts: c.artifacts.length,
+    nextSteps: c.nextSteps.length,
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt
+  }));
+  res.json({ contexts: all, count: all.length });
+});
+
+app.get('/api/context/:id', (req, res) => {
+  const { id } = req.params;
+  const packet = contextPackets.get(id);
+  if (!packet) return res.status(404).json({ error: 'Context not found' });
+  res.json({ context: packet });
+});
+
+app.put('/api/context/:id', (req, res) => {
+  const { id } = req.params;
+  const packet = contextPackets.get(id);
+  if (!packet) return res.status(404).json({ error: 'Context not found' });
+  
+  const { facts, constraints, decisions, artifacts, nextSteps } = req.body;
+  
+  if (facts) packet.facts = facts;
+  if (constraints) packet.constraints = constraints;
+  if (decisions) packet.decisions = [...packet.decisions, ...decisions];
+  if (artifacts) packet.artifacts = [...packet.artifacts, ...artifacts];
+  if (nextSteps) packet.nextSteps = [...packet.nextSteps, ...nextSteps];
+  
+  packet.updatedAt = new Date().toISOString();
+  packet.history.push({ from: 'api', at: new Date().toISOString(), action: 'updated' });
+  
+  res.json({ success: true, context: packet });
+});
+
+app.delete('/api/context/:id', (req, res) => {
+  const { id } = req.params;
+  if (!contextPackets.has(id)) return res.status(404).json({ error: 'Context not found' });
+  contextPackets.delete(id);
+  res.json({ success: true });
+});
+
+// ==================== MEMORY LAYERS API ====================
+// 3-layer distilled memory: inbox → working → project
+
+app.post('/api/memory', (req, res) => {
+  const { type, content, source, tags = [] } = req.body;
+  if (!content) return res.status(400).json({ error: 'content required' });
+  
+  const item = createMemoryItem(type || 'fact', content, source || 'api', tags);
+  
+  // Add to inbox by default
+  memoryLayers.inbox.push(item);
+  saveMemory();
+  
+  res.json({ success: true, memory: item });
+});
+
+app.get('/api/memory', (req, res) => {
+  const { layer, type, limit = 50 } = req.query;
+  
+  let memories;
+  if (layer && memoryLayers[layer]) {
+    memories = memoryLayers[layer];
+  } else {
+    // Return all layers
+    memories = [
+      ...memoryLayers.inbox,
+      ...memoryLayers.working,
+      ...memoryLayers.project
+    ];
+  }
+  
+  // Filter by type if provided
+  if (type) {
+    memories = memories.filter(m => m.type === type);
+  }
+  
+  // Sort by createdAt desc and limit
+  memories = memories
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .slice(0, parseInt(limit));
+  
+  res.json({
+    layers: {
+      inbox: memoryLayers.inbox.length,
+      working: memoryLayers.working.length,
+      project: memoryLayers.project.length
+    },
+    memories
+  });
+});
+
+app.get('/api/memory/:layer', (req, res) => {
+  const { layer } = req.params;
+  if (!memoryLayers[layer]) return res.status(400).json({ error: 'Invalid layer. Use: inbox, working, or project' });
+  
+  const memories = memoryLayers[layer]
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  
+  res.json({ layer, memories });
+});
+
+app.put('/api/memory/:id', (req, res) => {
+  const { id } = req.params;
+  const { content, tags, targetLayer } = req.body;
+  
+  // Search all layers
+  let item = [...memoryLayers.inbox, ...memoryLayers.working, ...memoryLayers.project]
+    .find(m => m.id === id);
+  
+  if (!item) return res.status(404).json({ error: 'Memory not found' });
+  
+  // Update content/tags
+  if (content) item.content = content;
+  if (tags) item.tags = tags;
+  item.updatedAt = new Date().toISOString();
+  item.accessCount++;
+  
+  // Move to different layer if requested
+  if (targetLayer && memoryLayers[targetLayer]) {
+    // Remove from current layer
+    memoryLayers.inbox = memoryLayers.inbox.filter(m => m.id !== id);
+    memoryLayers.working = memoryLayers.working.filter(m => m.id !== id);
+    memoryLayers.project = memoryLayers.project.filter(m => m.id !== id);
+    // Add to target
+    memoryLayers[targetLayer].push(item);
+  }
+  
+  saveMemory();
+  res.json({ success: true, memory: item });
+});
+
+app.delete('/api/memory/:id', (req, res) => {
+  const { id } = req.params;
+  
+  const removedFrom = [];
+  if (memoryLayers.inbox.some(m => m.id === id)) {
+    memoryLayers.inbox = memoryLayers.inbox.filter(m => m.id !== id);
+    removedFrom.push('inbox');
+  }
+  if (memoryLayers.working.some(m => m.id === id)) {
+    memoryLayers.working = memoryLayers.working.filter(m => m.id !== id);
+    removedFrom.push('working');
+  }
+  if (memoryLayers.project.some(m => m.id === id)) {
+    memoryLayers.project = memoryLayers.project.filter(m => m.id !== id);
+    removedFrom.push('project');
+  }
+  
+  if (removedFrom.length === 0) return res.status(404).json({ error: 'Memory not found' });
+  
+  saveMemory();
+  res.json({ success: true, removedFrom });
+});
+
+// Search memory across all layers
+app.get('/api/memory/search', (req, res) => {
+  const { q, type } = req.query;
+  if (!q) return res.status(400).json({ error: 'Query (q) required' });
+  
+  const all = [...memoryLayers.inbox, ...memoryLayers.working, ...memoryLayers.project];
+  let results = all.filter(m => 
+    m.content.toLowerCase().includes(q.toLowerCase()) ||
+    m.tags.some(t => t.toLowerCase().includes(q.toLowerCase()))
+  );
+  
+  if (type) {
+    results = results.filter(m => m.type === type);
+  }
+  
+  res.json({ query: q, results: results.slice(0, 20) });
+});
+
+// ==================== END MEMORY LAYERS ====================
+
 app.post('/api/handoff/:id/start', (req, res) => {
   const { id } = req.params;
   const handoff = handoffs.get(id);
@@ -1879,6 +3198,8 @@ app.post('/api/handoff/:id/start', (req, res) => {
 
   handoff.status = 'in_progress';
   handoff.startedAt = new Date().toISOString();
+  // P0: Persist state
+  saveHandoffs();
   console.log(`▶️  Started: ${handoff.fromAgent} → ${handoff.toAgent}: ${handoff.task?.substring(0, 50)}`);
 
   // Broadcast to WebSocket clients
@@ -1916,6 +3237,9 @@ app.post('/api/handoff/:id/complete', (req, res) => {
   }
 
   sendDiscordNotification(handoff, 'completed');
+  if (typeof crmRouter.logHandoffActivity === 'function') {
+    crmRouter.logHandoffActivity(handoff).catch(() => {});
+  }
   console.log(`✅ Completed: ${handoff.fromAgent} → ${handoff.toAgent}: ${handoff.task?.substring(0, 50)}`);
 
   // Post competitive research results to #competitor-intel when Prism completes research
@@ -2134,205 +3458,18 @@ app.get('/api/dashboard', (req, res) => {
       activePipelines: Object.values(pipelines || {}).filter(p => p.status === 'in_progress').length
     },
     byAgent,
-    pipelines: Object.values(pipelines || {}).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)),
-    recent: recent || [],
-    templates: templates ? Array.from(templates.keys()) : []
+    recent,
+    templates: Array.from(templates.keys())
   });
-});
-
-// Visual Dashboard HTML
-app.get('/dashboard', (req, res) => {
-  res.send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Agent Handoff Manager</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <style>
-    body { font-family: 'Inter', sans-serif; background: #0a0a0a; color: #fff; }
-    .glass { background: rgba(255,255,255,0.05); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }
-    .glow { box-shadow: 0 0 30px rgba(139, 92, 246, 0.3); }
-    .agent-available { background: linear-gradient(135deg, #10b981, #059669); }
-    .agent-working { background: linear-gradient(135deg, #f59e0b, #d97706); }
-    .agent-busy { background: linear-gradient(135deg, #ef4444, #dc2626); }
-    @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 20px rgba(139, 92, 246, 0.4); } 50% { box-shadow: 0 0 40px rgba(139, 92, 246, 0.8); } }
-    .pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
-    @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-    .slide-in { animation: slideIn 0.3s ease-out; }
-  </style>
-</head>
-<body class="min-h-screen">
-  <div class="max-w-7xl mx-auto p-6">
-    <!-- Header -->
-    <header class="flex justify-between items-center mb-8">
-      <div>
-        <h1 class="text-3xl font-bold bg-gradient-to-r from-violet-400 to-fuchsia-400 bg-clip-text text-transparent">
-          Agent Handoff Manager
-        </h1>
-        <p class="text-gray-400 text-sm mt-1">Orchestrate your AI agents</p>
-      </div>
-      <div class="flex gap-3">
-        <button onclick="refresh()" class="glass px-4 py-2 rounded-lg hover:bg-white/10 transition">↻ Refresh</button>
-        <button onclick="showNewHandoff()" class="bg-violet-600 hover:bg-violet-500 px-4 py-2 rounded-lg transition glow">+ New Handoff</button>
-      </div>
-    </header>
-
-    <!-- Stats -->
-    <div class="grid grid-cols-4 gap-4 mb-8">
-      <div class="glass rounded-xl p-4">
-        <div class="text-gray-400 text-sm">Total</div>
-        <div class="text-3xl font-bold" id="stat-total">-</div>
-      </div>
-      <div class="glass rounded-xl p-4">
-        <div class="text-gray-400 text-sm">Pending</div>
-        <div class="text-3xl font-bold text-amber-400" id="stat-pending">-</div>
-      </div>
-      <div class="glass rounded-xl p-4">
-        <div class="text-gray-400 text-sm">Completed</div>
-        <div class="text-3xl font-bold text-emerald-400" id="stat-completed">-</div>
-      </div>
-      <div class="glass rounded-xl p-4">
-        <div class="text-gray-400 text-sm">Overdue</div>
-        <div class="text-3xl font-bold text-red-400" id="stat-overdue">-</div>
-      </div>
-    </div>
-
-    <!-- Agents Grid -->
-    <div class="grid grid-cols-5 gap-3 mb-8" id="agents-grid"></div>
-
-    <!-- Recent Activity -->
-    <div class="glass rounded-xl p-6">
-      <h2 class="text-xl font-semibold mb-4">Recent Activity</h2>
-      <div class="space-y-2" id="recent-activity"></div>
-    </div>
-
-    <!-- Templates -->
-    <div class="glass rounded-xl p-6 mt-6">
-      <h2 class="text-xl font-semibold mb-4">Pipeline Templates</h2>
-      <div class="grid grid-cols-4 gap-3" id="templates-grid"></div>
-    </div>
-  </div>
-
-  <!-- New Handoff Modal -->
-  <div id="modal" class="fixed inset-0 bg-black/80 hidden items-center justify-center">
-    <div class="glass rounded-xl p-6 w-96 slide-in">
-      <h3 class="text-xl font-semibold mb-4">New Handoff</h3>
-      <div class="space-y-3">
-        <select id="fromAgent" class="w-full bg-white/10 rounded-lg p-3 border border-white/10">
-          <option value="chroma">Chroma</option>
-        </select>
-        <select id="toAgent" class="w-full bg-white/10 rounded-lg p-3 border border-white/10">
-          <option value="bender">Bender</option>
-          <option value="pixel">Pixel</option>
-          <option value="prism">Prism</option>
-          <option value="canvas">Canvas</option>
-          <option value="flux">Flux</option>
-        </select>
-        <input id="task" placeholder="Task description" class="w-full bg-white/10 rounded-lg p-3 border border-white/10">
-        <input id="context" placeholder="Context (optional)" class="w-full bg-white/10 rounded-lg p-3 border border-white/10">
-        <button onclick="createHandoff()" class="w-full bg-violet-600 hover:bg-violet-500 py-3 rounded-lg transition">Create</button>
-        <button onclick="closeModal()" class="w-full glass py-2 rounded-lg">Cancel</button>
-      </div>
-    </div>
-  </div>
-
-  <script>
-    const agents = ['chroma','bender','pixel','canvas','flux','prism','lumen','momentum','glyph','chief'];
-    const agentNames = {chroma:'🤖 Chroma',bender:'🤖 Bender',pixel:'🎨 Pixel',canvas:'🎨 Canvas',flux:'🎬 Flux',prism:'🔮 Prism',lumen:'💡 Lumen',momentum:'🦈 Momentum',glyph:'🧙‍♀️ Glyph',chief:'👔 Chief'};
-    
-    async function refresh() {
-      const d = await fetch('/api/dashboard').then(r=>r.json());
-      document.getElementById('stat-total').textContent = d.summary.total;
-      document.getElementById('stat-pending').textContent = d.summary.pending;
-      document.getElementById('stat-completed').textContent = d.summary.completed;
-      document.getElementById('stat-overdue').textContent = d.summary.overdue;
-      
-      let html = '';
-      for (const [id, a] of Object.entries(d.byAgent)) {
-        const cls = a.status === 'available' ? 'agent-available' : a.status === 'working' ? 'agent-working' : 'agent-busy';
-        html += \`<div class="glass rounded-lg p-3 text-center">
-          <div class="text-2xl mb-1">\${agentNames[id] || id}</div>
-          <div class="text-xs text-gray-400">\${a.pending} pending</div>
-          <div class="h-1 mt-2 rounded-full \${cls}"></div>
-        </div>\`;
-      }
-      document.getElementById('agents-grid').innerHTML = html;
-      
-      html = '';
-      for (const r of d.recent) {
-        const statusColors = {pending:'text-amber-400',in_progress:'text-blue-400',completed:'text-emerald-400',failed:'text-red-400'};
-        html += \`<div class="flex justify-between items-center py-2 border-b border-white/5 slide-in">
-          <div>
-            <span class="text-violet-400">\${r.from}</span> → <span class="text-fuchsia-400">\${r.to}</span>
-            <div class="text-sm text-gray-400">\${r.task || 'No task'}</div>
-          </div>
-          <div class="text-right">
-            <div class="font-mono text-xs text-gray-500">\${r.id.slice(-8)}</div>
-            <div class="\${statusColors[r.status]} text-sm">\${r.status}</div>
-          </div>
-        </div>\`;
-      }
-      document.getElementById('recent-activity').innerHTML = html || '<div class="text-gray-500">No activity</div>';
-      
-      html = '';
-      for (const t of d.templates) {
-        html += \`<button onclick="runTemplate('\${t}')" class="glass hover:bg-white/10 px-4 py-2 rounded-lg text-left slide-in">
-          <div class="font-medium">\${t.replace(/-/g,' ')}</div>
-          <div class="text-xs text-gray-400">Click to run</div>
-        </button>\`;
-      }
-      document.getElementById('templates-grid').innerHTML = html;
-    }
-    
-    function showNewHandoff() { document.getElementById('modal').classList.remove('hidden'); document.getElementById('modal').classList.add('flex'); }
-    function closeModal() { document.getElementById('modal').classList.add('hidden'); document.getElementById('modal').classList.remove('flex'); }
-    
-    async function createHandoff() {
-      await fetch('/api/handoff', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({
-          fromAgent: document.getElementById('fromAgent').value,
-          toAgent: document.getElementById('toAgent').value,
-          task: document.getElementById('task').value,
-          context: document.getElementById('context').value,
-          priority: 'medium'
-        })
-      });
-      closeModal();
-      refresh();
-    }
-    
-    async function runTemplate(name) {
-      const task = prompt('Task description:');
-      if (!task) return;
-      await fetch(\`/api/template/\${name}/execute\`, {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ task, context: '', priority: 'high', runAsync: true })
-      });
-      refresh();
-    }
-    
-    refresh();
-    setInterval(refresh, 5000);
-  </script>
-</body>
-</html>`);
 });
 
 // ==================== PIPELINE DELIVERABLES ====================
 
-// Default output directory for agent deliverables
-const DEFAULT_OUTPUT_DIR = '/Volumes/MiDRIVE/Chroma-Team/output';
-
 // FIX #2: Multiple possible output paths (check all of them)
 const POSSIBLE_OUTPUT_PATHS = [
-  '/Volumes/MiDRIVE/Chroma-Team/output',  // Default
-  '/Volumes/MiDRIVE/Chroma-Team/output/handoffs',  // Old path
-  '/Volumes/MiDRIVE/Chroma-Team/output/pipelines',  // Pipeline path
+  DEFAULT_OUTPUT_DIR,  // Default
+  path.join(DEFAULT_OUTPUT_DIR, 'handoffs'),  // Old path
+  path.join(DEFAULT_OUTPUT_DIR, 'pipelines'),  // Pipeline path
   '/Users/king-lewie/.openclaw/workspace',  // Local workspace
   process.cwd()  // Current working directory
 ];
@@ -2346,14 +3483,24 @@ app.get('/api/handoff/:id/deliverables', (req, res) => {
     return res.status(404).json({ error: 'Handoff not found' });
   }
 
+  const executionTarget = handoff.executionTarget || normalizeExecutionTarget(handoff, handoff);
+  if (executionTarget.workMode === WORK_MODE_IN_PLACE) {
+    return res.json({
+      files: [],
+      searchedPaths: [],
+      foundPath: executionTarget.targetPath,
+      count: 0,
+      handoffId: id,
+      pipelineId: handoff.pipelineId,
+      workMode: executionTarget.workMode,
+      workdir: executionTarget.workdir,
+      targetPath: executionTarget.targetPath,
+      message: 'This handoff edits an existing target repo in place; no AHM artifact directory is expected.'
+    });
+  }
+
   // FIX #2: Check multiple possible paths
-  const outputPaths = [
-    handoff.pipelineId ? path.join(DEFAULT_OUTPUT_DIR, 'pipelines', handoff.pipelineId) : null,
-    path.join(DEFAULT_OUTPUT_DIR, 'handoffs', id),
-    path.join(DEFAULT_OUTPUT_DIR, 'agents', handoff.toAgent, id),
-    path.join(process.cwd(), 'output', id),
-    path.join('/Users/king-lewie/.openclaw/workspace', handoff.pipelineId || id)
-  ].filter(Boolean);
+  const outputPaths = getArtifactSearchPaths(handoff);
 
   // Check all paths for files
   const allFiles = [];
@@ -2399,7 +3546,10 @@ app.get('/api/handoff/:id/deliverables', (req, res) => {
     foundPath,
     count: allFiles.length,
     handoffId: id,
-    pipelineId: handoff.pipelineId
+    pipelineId: handoff.pipelineId,
+    workMode: executionTarget.workMode,
+    workdir: executionTarget.workdir,
+    targetPath: executionTarget.targetPath
   });
 });
 
@@ -2435,10 +3585,15 @@ app.post('/api/upload', upload.array('files', 10), (req, res) => {
 // Upload files as part of a handoff creation
 app.post('/api/handoff-with-files', upload.array('files', 10), async (req, res) => {
   try {
-    const { fromAgent, toAgent, task, context, priority } = req.body;
+    const { fromAgent, toAgent, task, context, priority, targetPath, workdir, workMode } = req.body;
 
     if (!fromAgent || !toAgent) {
       return res.status(400).json({ error: 'fromAgent and toAgent required' });
+    }
+
+    const executionTargetError = validateExecutionTargetInput({ targetPath, workdir, workMode });
+    if (executionTargetError) {
+      return res.status(400).json({ error: executionTargetError });
     }
 
     const files = (req.files || []).map(f => ({
@@ -2455,7 +3610,12 @@ app.post('/api/handoff-with-files', upload.array('files', 10), async (req, res) 
       ? `${context || ''}\n\n--- Attachments ---\n${files.map(f => `- ${f.name} (${f.type}): ${f.url}`).join('\n')}`
       : context || '';
 
-    const result = await createHandoff(fromAgent, toAgent, task, fileContext, [], [], priority || 'medium', { files });
+    const result = await createHandoff(fromAgent, toAgent, task, fileContext, [], [], priority || 'medium', {
+      files,
+      targetPath,
+      workdir,
+      workMode,
+    });
     res.json({ success: true, ...result, files });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -2647,13 +3807,19 @@ async function syncToChromabase(pipeline, handoffs) {
 // Helper to ensure deliverables are written to disk before completing
 // FIX #3: Improved verification with better error handling - always shows agent response
 async function ensureDeliverablesReady(handoff, maxRetries = 3) {
-  const outputPaths = [
-    handoff.pipelineId ? path.join(DEFAULT_OUTPUT_DIR, 'pipelines', handoff.pipelineId) : null,
-    path.join(DEFAULT_OUTPUT_DIR, 'handoffs', handoff.id),
-    path.join(DEFAULT_OUTPUT_DIR, 'agents', handoff.toAgent, handoff.id),
-    path.join(process.cwd(), 'output', handoff.id),
-    path.join('/Users/king-lewie/.openclaw/workspace', handoff.pipelineId || handoff.id)
-  ].filter(Boolean);
+  const executionTarget = handoff.executionTarget || normalizeExecutionTarget(handoff, handoff);
+  if (executionTarget.workMode === WORK_MODE_IN_PLACE) {
+    console.log(`🔍 Skipping artifact verification for ${handoff.id}; configured for in-place work at ${executionTarget.workdir}`);
+    return {
+      verified: true,
+      skipped: true,
+      workMode: executionTarget.workMode,
+      targetPath: executionTarget.targetPath,
+      workdir: executionTarget.workdir,
+    };
+  }
+
+  const outputPaths = getArtifactSearchPaths(handoff);
 
   console.log(`🔍 Verifying deliverables for ${handoff.id}...`);
 
@@ -2693,11 +3859,30 @@ async function ensureDeliverablesReady(handoff, maxRetries = 3) {
   }
 
   // FIX #3: Don't fail - just warn and return what we have
+  // FIX #4: Fallback - save agent response as file if no files found
   console.log(`   ⚠️ Verification timed out after ${maxRetries} attempts.`);
   console.log(`   📋 Agent response available: ${handoff.agentResponse ? 'YES' : 'NO'}`);
 
   if (handoff.agentResponse) {
     console.log(`   📝 Response preview: ${handoff.agentResponse.substring(0, 200)}...`);
+    
+    const outputPath = executionTarget.artifactPath || executionTarget.workdir;
+    if (outputPath && fs.existsSync(outputPath)) {
+      try {
+        const saved = persistAgentResponseArtifact(outputPath, handoff.agentResponse, handoff.toAgent);
+        if (saved) {
+          console.log(`   📝 Fallback: Saved agent response as ${saved.fileName}`);
+          return {
+            verified: true,
+            fallback: true,
+            path: outputPath,
+            files: [{ name: saved.fileName, size: saved.cleanContent.length }]
+          };
+        }
+      } catch (e) {
+        console.log(`   ⚠️ Fallback save failed: ${e.message}`);
+      }
+    }
   }
 
   return {
@@ -2721,6 +3906,12 @@ async function completeHandoff(handoff) {
 
   console.log(`✅ Completed: ${handoff.fromAgent} → ${handoff.toAgent}: ${handoff.task?.substring(0, 60)}`);
   sendDiscordNotification(handoff, 'completed');
+  
+  // P0: Persist state
+  saveHandoffs();
+  if (typeof crmRouter.logHandoffActivity === 'function') {
+    crmRouter.logHandoffActivity(handoff).catch(() => {});
+  }
 
   // Post competitive research results to #competitor-intel when Prism completes research
   if (handoff.toAgent === 'prism' && handoff.task && handoff.task.toLowerCase().includes('competit')) {
@@ -2746,14 +3937,22 @@ async function completeHandoff(handoff) {
 
     if (remaining.length === 0) {
       console.log(`🔄 Pipeline ${handoff.pipelineId} COMPLETE - triggering integrations!`);
-
-      // Pipeline complete - trigger ChromaBrain and Chromabase sync
-      const pipelineOutput = `/Volumes/MiDRIVE/Chroma-Team/output/pipelines/${handoff.pipelineId}`;
-
       // Get all handoffs for this pipeline
       const pipelineHandoffs = Array.from(handoffs.values()).filter(
         h => h.pipelineId === handoff.pipelineId
       );
+
+      const pipelineUsesInPlaceWork = pipelineHandoffs.some(
+        h => (h.executionTarget || normalizeExecutionTarget(h, h)).workMode === WORK_MODE_IN_PLACE
+      );
+
+      if (pipelineUsesInPlaceWork) {
+        console.log(`ℹ️ Pipeline ${handoff.pipelineId} used in-place work; skipping artifact upload/indexing integrations.`);
+        return;
+      }
+
+      // Pipeline complete - trigger ChromaBrain and Chromabase sync
+      const pipelineOutput = getArtifactOutputPath({ pipelineId: handoff.pipelineId, handoffId: handoff.id });
 
       console.log(`🔄 Pipeline ${handoff.pipelineId} complete, triggering integrations...`);
 
@@ -2779,6 +3978,7 @@ const AGENT_ID_MAP = {
   'momentum': 'momentum',
   'glyph': 'glyph',
   'chief': 'chief',
+  'critic': 'critic',
   // Sub-agents - FIX #1: Add sub-agent support
   'frontend-dev': 'frontend-dev',
   'backend-dev': 'backend-dev',
@@ -2786,7 +3986,13 @@ const AGENT_ID_MAP = {
   'qa-tester': 'qa-tester',
   'mobile-dev': 'mobile-dev',
   'market-researcher': 'market-researcher',
-  'competitor-analyst': 'competitor-analyst'
+  'competitor-analyst': 'competitor-analyst',
+  // Marketing sub-agents (Pixel's team)
+  'content-writer': 'content-writer',
+  'social-manager': 'social-manager',
+  'seo-specialist': 'seo-specialist',
+  'ad-creator': 'ad-creator',
+  'email-marketer': 'email-marketer'
 };
 
 // Parent-child agent relationships for sub-agent spawning
@@ -2797,7 +4003,15 @@ const AGENT_PARENTS = {
   'qa-tester': 'bender',
   'mobile-dev': 'bender',
   'market-researcher': 'prism',
-  'competitor-analyst': 'prism'
+  'competitor-analyst': 'prism',
+  // Marketing team - Pixel leads all
+  'canvas': 'pixel',
+  'flux': 'pixel',
+  'content-writer': 'pixel',
+  'social-manager': 'pixel',
+  'seo-specialist': 'pixel',
+  'ad-creator': 'pixel',
+  'email-marketer': 'pixel'
 };
 
 // Use child_process to invoke OpenClaw CLI
@@ -2805,11 +4019,24 @@ const { exec } = require('child_process');
 
 // Prompt suffix to instruct agents on where to save deliverables
 function getTaskSuffix(handoff) {
-  const outputPath = handoff.pipelineId
-    ? `${DEFAULT_OUTPUT_DIR}/pipelines/${handoff.pipelineId}`
-    : `${DEFAULT_OUTPUT_DIR}/handoffs`;
+  const executionTarget = handoff.executionTarget || normalizeExecutionTarget(handoff, handoff);
 
-  return `\n\n📁 IMPORTANT: Save any files, research, code, or deliverables to:\n${outputPath}\n\nIf you create any files, note the file paths in your response so they can be retrieved.`;
+  if (executionTarget.workMode === WORK_MODE_IN_PLACE) {
+    return `\n\n🛠️ WORK MODE: in_place\nTarget repo/app: ${executionTarget.targetPath}\nWorking directory: ${executionTarget.workdir}\nEdit the existing project in place instead of writing to AHM handoff/pipeline artifact folders.\nIf you change files, mention the modified paths in your response.`;
+  }
+
+  return `\n\n📁 WORK MODE: artifact\nSave any files, research, code, or deliverables to:\n${executionTarget.artifactPath}\n\nIf you create any files, note the file paths in your response so they can be retrieved.`;
+}
+
+function persistAgentResponseArtifact(outputPath, agentResponse, agentId, filePrefix = null) {
+  if (!outputPath || !agentResponse) return null;
+  if (!fs.existsSync(outputPath)) return null;
+
+  const cleanContent = extractCleanContent(agentResponse, agentId);
+  const safePrefix = filePrefix || `${agentId}-response`;
+  const fileName = `${safePrefix}-${Date.now()}.txt`;
+  fs.writeFileSync(path.join(outputPath, fileName), cleanContent);
+  return { fileName, cleanContent };
 }
 
 // Agent endpoint - URL to call agents on local device
@@ -2824,6 +4051,9 @@ async function invokeOpenClawAgent(agentId, task, context, handoff) {
     throw new Error(`Unknown agent: ${agentId}`);
   }
 
+  const executionTarget = handoff.executionTarget || normalizeExecutionTarget(handoff, handoff);
+  ensureExecutionFilesystemTarget(executionTarget);
+
   // Build the task prompt with context and output instructions
   let fullTask = context
     ? `${task}\n\nContext: ${context}`
@@ -2836,59 +4066,117 @@ async function invokeOpenClawAgent(agentId, task, context, handoff) {
   console.log(`   Mode: ${AGENT_MODE}`);
   console.log(`   Task: ${fullTask.substring(0, 100)}...`);
 
+  // P0: Timeout enforcement - default 2 minutes
+  const AGENT_TIMEOUT_MS = 120000; // 2 minutes
+  const timeoutError = new Error(`Agent timed out after ${AGENT_TIMEOUT_MS/1000}s`);
+
   if (AGENT_MODE === 'local_http') {
     // Call local agents via HTTP API
-    try {
-      const response = await fetch(`${LOCAL_AGENT_ENDPOINT}/${openClawAgentId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          task: fullTask,
-          agentId: openClawAgentId,
-          handoffId: handoff.id,
-          pipelineId: handoff.pipelineId
-        }),
-        timeout: 300000 // 5 minute timeout
-      });
+    const agentPromise = (async () => {
+      try {
+        const response = await fetch(`${LOCAL_AGENT_ENDPOINT}/${openClawAgentId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            task,
+            context,
+            agentId: openClawAgentId,
+            handoffId: handoff.id,
+            pipelineId: handoff.pipelineId,
+            executionTarget,
+          }),
+          signal: AbortSignal.timeout(AGENT_TIMEOUT_MS)
+        });
 
-      if (!response.ok) {
-        throw new Error(`Agent API error: ${response.status}`);
+        if (!response.ok) {
+          throw new Error(`Agent API error: ${response.status}`);
+        }
+
+        const result = await response.json();
+        console.log(`✅ Agent ${openClawAgentId} responded via HTTP`);
+        return result;
+      } catch (error) {
+        console.error(`❌ Agent HTTP call failed:`, error.message);
+        throw error;
       }
+    })();
 
-      const result = await response.json();
-      console.log(`✅ Agent ${openClawAgentId} responded via HTTP`);
-      return result;
-    } catch (error) {
-      console.error(`❌ Agent HTTP call failed:`, error.message);
-      throw error;
-    }
+    return Promise.race([agentPromise, new Promise((_, reject) => 
+      setTimeout(() => reject(timeoutError), AGENT_TIMEOUT_MS)
+    )]);
   } else {
     // Legacy: Use OpenClaw CLI (for backward compatibility)
-    return new Promise((resolve, reject) => {
+    // P0: Wrap CLI call with timeout
+    const cliPromise = new Promise((resolve, reject) => {
       // Escape the task for shell
       const escapedTask = fullTask.replace(/"/g, '\\"');
 
       const cmd = `openclaw agent --agent ${openClawAgentId} --message "${escapedTask}" --json --timeout 300`;
 
-      exec(cmd, { timeout: 360000 }, (error, stdout, stderr) => {
-        if (error) {
-          console.error(`❌ OpenClaw CLI error:`, error.message);
-          return reject(new Error(`OpenClaw CLI error: ${error.message}`));
-        }
+      const { spawn } = require('child_process');
+      const child = spawn('bash', ['-c', cmd], {
+        cwd: executionTarget.workdir,
+      });
 
-        if (stderr) {
-          console.log(`⚠️ OpenClaw stderr:`, stderr);
+      let stdout = '';
+      let stderr = '';
+      let settled = false;
+      const finish = (err, value) => {
+        if (settled) return;
+        settled = true;
+        if (err) reject(err);
+        else resolve(value);
+      };
+
+      const killTimer = setTimeout(() => {
+        try { child.kill('SIGTERM'); } catch {}
+        finish(new Error(`OpenClaw CLI timed out after ${AGENT_TIMEOUT_MS/1000}s`));
+      }, AGENT_TIMEOUT_MS);
+
+      child.stdout.on('data', (data) => { stdout += data.toString(); });
+      child.stderr.on('data', (data) => { stderr += data.toString(); });
+
+      child.on('error', (error) => {
+        clearTimeout(killTimer);
+        console.error(`❌ OpenClaw CLI error:`, error.message);
+        finish(new Error(`OpenClaw CLI error: ${error.message}`));
+      });
+
+      child.on('close', (code) => {
+        clearTimeout(killTimer);
+
+        if (code !== 0 && stderr) {
+          console.error(`❌ OpenClaw CLI error:`, stderr);
+          return finish(new Error(`OpenClaw CLI error: ${stderr}`));
         }
 
         try {
-          const result = stdout ? JSON.parse(stdout) : { message: 'Completed' };
-          console.log(`✅ OpenClaw agent ${openClawAgentId} responded`);
-          resolve(result);
-        } catch (parseErr) {
-          resolve({ message: stdout || 'Completed', raw: true });
+          let result = {};
+          try {
+            result = stdout ? JSON.parse(stdout) : {};
+          } catch {
+            result = { raw: stdout };
+          }
+
+          const payloads = result.result?.payloads || result.payloads;
+          const message = payloads?.[0]?.text
+            || result.result?.message
+            || result.message
+            || result.response
+            || result.output
+            || result.text
+            || (result.raw ? result.raw.substring(0, 1000) : 'Completed');
+
+          finish(null, { message, payloads, raw: result.raw || stdout });
+        } catch {
+          finish(null, { message: stdout || 'Completed', raw: stdout, rawFallback: true });
         }
       });
     });
+
+    return Promise.race([cliPromise, new Promise((_, reject) =>
+      setTimeout(() => reject(timeoutError), AGENT_TIMEOUT_MS)
+    )]);
   }
 }
 
@@ -2907,25 +4195,37 @@ async function processHandoff(handoff) {
     // Mark in_progress
     handoff.status = 'in_progress';
     handoff.startedAt = new Date().toISOString();
+    // P0: Persist state
+    saveHandoffs();
     console.log(`▶️  Processing: ${handoff.fromAgent} → ${handoff.toAgent}: ${handoff.task?.substring(0, 60)}`);
 
     // Get timeout from config for this agent
     const agentTimeout = config.agentTimeouts[handoff.toAgent] || 300000;
 
-    // Invoke the actual OpenClaw agent
+    // P0: Hard timeout enforcement - 2 minutes max
+    const HARD_TIMEOUT_MS = 120000;
+    const timeoutError = new Error(`Agent timed out after ${HARD_TIMEOUT_MS/1000}s - forcing failure`);
+
+    // Invoke the actual OpenClaw agent with timeout
     try {
-      const result = await invokeOpenClawAgent(
-        handoff.toAgent,
-        handoff.task,
-        handoff.context,
-        handoff
-      );
+      const result = await Promise.race([
+        invokeOpenClawAgent(
+          handoff.toAgent,
+          handoff.task,
+          handoff.context,
+          handoff
+        ),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(timeoutError), HARD_TIMEOUT_MS)
+        )
+      ]);
 
       // Store the agent's response in the handoff record
-      handoff.agentResponse = result.message || JSON.stringify(result);
+      const responseText = result?.message || result?.payloads?.[0]?.text || (result ? JSON.stringify(result).substring(0,1000) : 'No response');
+      handoff.agentResponse = responseText || 'Completed';
       handoff.responseAt = new Date().toISOString();
 
-      console.log(`✅ Agent ${handoff.toAgent} completed successfully`);
+      console.log(`✅ Agent ${handoff.toAgent} completed: ${(responseText || '').substring(0, 60)}...`);
 
       // Verify files are synced before marking as complete
       await ensureDeliverablesReady(handoff);
@@ -2956,6 +4256,8 @@ async function processHandoff(handoff) {
   } catch (err) {
     handoff.status = 'failed';
     handoff.error = err.message;
+    // P0: Persist state
+    saveHandoffs();
     console.error(`❌ Failed to process handoff ${handoff.id}:`, err.message);
   } finally {
     processingHandoffs.delete(handoff.id);
@@ -3416,7 +4718,691 @@ app.post('/api/automations/:id/schedule', (req, res) => {
   return res.json({ error: "Schedule automation - use /api/schedules directly" });
 });
 
-// ==================== START ====================
+// ==================== MARKETING HUB API ====================
+
+// Helper to add activity entry
+function addMarketingActivity(action, type, entityId, details = {}) {
+  // Map action to status
+  const statusMap = { created: 'in_progress', updated: 'in_progress', approved: 'completed', rejected: 'completed', deleted: 'failed', failed: 'failed' };
+  const entry = {
+    id: `activity_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+    action,
+    type,
+    entityId,
+    details,
+    // Frontend expects these fields:
+    agent: details.agent || 'system',
+    agentEmoji: details.agentEmoji || '🤖',
+    taskType: type,
+    brandId: details.brandId || entityId,
+    status: statusMap[action] || 'pending',
+    timestamp: new Date().toISOString()
+  };
+  marketingActivity.unshift(entry);
+  // Keep last 50
+  if (marketingActivity.length > 50) marketingActivity.pop();
+  return entry;
+}
+
+// --- Brands API ---
+app.get('/api/marketing/brands', (req, res) => {
+  const brandList = Array.from(brands.values());
+  res.json({ brands: brandList, count: brandList.length });
+});
+
+app.post('/api/marketing/brands', (req, res) => {
+  const { name, logo, colors, fonts, tone, audience, styleGuideLinks } = req.body;
+  if (!name) return res.status(400).json({ error: 'name required' });
+  
+  const id = `brand_${Date.now()}`;
+  const brand = {
+    id,
+    name,
+    logo: logo || '',
+    colors: colors || { primary: '#3b82f6', secondary: '#1e40af' },
+    fonts: fonts || { primary: 'Inter' },
+    tone: tone || 'Professional',
+    audience: audience || '',
+    styleGuideLinks: styleGuideLinks || [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  
+  brands.set(id, brand);
+  addMarketingActivity('created', 'brand', id, { name });
+  res.json({ success: true, brand });
+});
+
+app.get('/api/marketing/brands/:id', (req, res) => {
+  const brand = brands.get(req.params.id);
+  if (!brand) return res.status(404).json({ error: 'Brand not found' });
+  res.json({ brand });
+});
+
+app.put('/api/marketing/brands/:id', (req, res) => {
+  const brand = brands.get(req.params.id);
+  if (!brand) return res.status(404).json({ error: 'Brand not found' });
+  
+  const { name, logo, colors, fonts, tone, audience, styleGuideLinks } = req.body;
+  if (name) brand.name = name;
+  if (logo !== undefined) brand.logo = logo;
+  if (colors) brand.colors = { ...brand.colors, ...colors };
+  if (fonts) brand.fonts = { ...brand.fonts, ...fonts };
+  if (tone) brand.tone = tone;
+  if (audience) brand.audience = audience;
+  if (styleGuideLinks) brand.styleGuideLinks = styleGuideLinks;
+  brand.updatedAt = new Date().toISOString();
+  
+  brands.set(brand.id, brand);
+  addMarketingActivity('updated', 'brand', brand.id, { name: brand.name });
+  res.json({ success: true, brand });
+});
+
+app.delete('/api/marketing/brands/:id', (req, res) => {
+  const brand = brands.get(req.params.id);
+  if (!brand) return res.status(404).json({ error: 'Brand not found' });
+  
+  brands.delete(req.params.id);
+  addMarketingActivity('deleted', 'brand', req.params.id, { name: brand.name });
+  res.json({ success: true });
+});
+
+// --- Competitors API ---
+app.get('/api/marketing/competitors', (req, res) => {
+  const { brandId } = req.query;
+  let list = Array.from(competitors.values());
+  if (brandId) {
+    list = list.filter(c => c.brandId === brandId);
+  }
+  res.json({ competitors: list, count: list.length });
+});
+
+app.post('/api/marketing/competitors', (req, res) => {
+  const { brandId, name, website, strengths, weaknesses, keywords, notes } = req.body;
+  if (!name) return res.status(400).json({ error: 'name required' });
+  
+  const id = `competitor_${Date.now()}`;
+  const competitor = {
+    id,
+    brandId: brandId || null,
+    name,
+    website: website || '',
+    strengths: strengths || [],
+    weaknesses: weaknesses || [],
+    keywords: keywords || [],
+    notes: notes || '',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  
+  competitors.set(id, competitor);
+  addMarketingActivity('created', 'competitor', id, { name, brandId });
+  res.json({ success: true, competitor });
+});
+
+// --- Marketing Requests API ---
+app.get('/api/marketing/requests', (req, res) => {
+  const { status } = req.query;
+  let list = Array.from(marketingRequests.values()).map(syncMarketingRequest);
+  if (status) {
+    list = list.filter(r => r.status === status);
+  }
+  res.json({ requests: list, count: list.length });
+});
+
+app.post('/api/marketing/requests', async (req, res) => {
+  const { brandId, type, notes, description, priority } = req.body;
+  const title = notes || description || `Marketing request: ${type}`;
+  if (!type) return res.status(400).json({ error: 'type required' });
+  
+  const agent = MARKETING_AGENTS[type] || 'pixel';
+  const agentEmoji = { 'seo-specialist': '🔍', 'ad-creator': '📺', 'email-marketer': '📧', 'social-manager': '📱', 'competitor-analyst': '📊', 'content-writer': '✍️', 'pixel': '🎨' }[agent] || '🤖';
+  const id = `request_${Date.now()}`;
+  const request = {
+    id,
+    brandId: brandId || null,
+    type,
+    title,
+    description: description || '',
+    priority: priority || 'medium',
+    status: 'pending',
+    assignedAgent: agent,
+    handoffId: null,
+    deliverableId: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  const brand = brandId ? brands.get(brandId) : null;
+  const taskText = `${title}\n\nRequest type: ${type}\nBrand: ${brand ? brand.name : 'General'}\nPriority: ${request.priority}${description ? `\n\nNotes: ${description}` : ''}\n\n📁 OUTPUT INSTRUCTIONS:\n1. Save your work to the handoff output folder when instructed\n2. Provide CLEAN, USABLE deliverables - not raw JSON dumps\n3. For research: save a markdown summary file with key findings\n4. For content: save the actual copy/content in a usable format\n5. Include a brief summary of what you produced\n\n⚠️ IMPORTANT: Don't just return JSON metadata. Produce actual usable content.`;
+  const handoffResult = await createHandoff('chroma', agent, taskText, `Marketing Hub request ${id}`, [], [], request.priority, { brandId: request.brandId });
+
+  request.handoffId = handoffResult.handoffId;
+  request.status = 'in_progress';
+  marketingRequests.set(id, request);
+  
+  addMarketingActivity('created', 'request', id, { 
+    title, 
+    type, 
+    agent,
+    agentEmoji,
+    brandId: brandId || 'unknown',
+    status: 'in_progress',
+    handoffId: request.handoffId
+  });
+  
+  res.json({ success: true, request, agent, handoffId: request.handoffId });
+});
+
+app.put('/api/marketing/requests/:id', (req, res) => {
+  const request = marketingRequests.get(req.params.id);
+  if (!request) return res.status(404).json({ error: 'Request not found' });
+  
+  const { status, priority, description } = req.body;
+  if (status) request.status = status;
+  if (priority) request.priority = priority;
+  if (description) request.description = description;
+  request.updatedAt = new Date().toISOString();
+  
+  marketingRequests.set(request.id, request);
+  addMarketingActivity('updated', 'request', request.id, { status: request.status });
+  res.json({ success: true, request });
+});
+
+app.post('/api/marketing/requests/:id/approve', (req, res) => {
+  const request = marketingRequests.get(req.params.id);
+  if (!request) return res.status(404).json({ error: 'Request not found' });
+  
+  request.status = 'approved';
+  request.approvedAt = new Date().toISOString();
+  request.updatedAt = new Date().toISOString();
+  
+  marketingRequests.set(request.id, request);
+  addMarketingActivity('approved', 'request', request.id, { title: request.title });
+  res.json({ success: true, request });
+});
+
+app.post('/api/marketing/requests/:id/reject', (req, res) => {
+  const request = marketingRequests.get(req.params.id);
+  if (!request) return res.status(404).json({ error: 'Request not found' });
+  
+  const { reason } = req.body;
+  request.status = 'rejected';
+  request.rejectReason = reason || '';
+  request.updatedAt = new Date().toISOString();
+  
+  marketingRequests.set(request.id, request);
+  addMarketingActivity('rejected', 'request', request.id, { title: request.title, reason });
+  res.json({ success: true, request });
+});
+
+// --- Marketing Pipeline Templates ---
+app.post('/api/marketing/pipelines/competitor-brief', async (req, res) => {
+  const { brandId, notes } = req.body;
+  const brand = brandId ? brands.get(brandId) : null;
+  const brandName = brand ? brand.name : 'General';
+  
+  // Create Chief task for this pipeline
+  const tasksFile = path.join(__dirname, 'data', 'tasks.json');
+  let tasksData = { tasks: [], columns: [], priorities: [], owners: [] };
+  try { if (fs.existsSync(tasksFile)) tasksData = JSON.parse(fs.readFileSync(tasksFile, 'utf8')); } catch (e) {}
+  const taskId = 'task_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+  const pipelineTask = {
+    id: taskId,
+    title: `Competitor Research → Design Brief: ${brandName}`,
+    description: notes || 'Full pipeline: Prism research → Canvas design brief',
+    owner: 'chroma',
+    priority: 'high',
+    column: 'in_progress',
+    doneCriteria: 'Both steps complete with deliverables',
+    criticChecklist: 'Prism delivers research; Canvas creates brief; files exist in output folder',
+    criticReviewed: false,
+    blockers: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  tasksData.tasks.push(pipelineTask);
+  fs.writeFileSync(tasksFile, JSON.stringify(tasksData, null, 2));
+  
+  const step1Task = `Research competitors for ${brandName}
+
+${notes ? `Context: ${notes}` : ''}
+
+📁 OUTPUT: Save research findings to the handoff folder as a markdown file.`;
+
+  const step2Task = `Create a design brief based on competitor research
+
+Previous research is in the context above.
+
+📁 OUTPUT: Save design brief to the handoff folder as markdown. Include:
+- Target audience
+- Key messaging
+- Visual direction
+- Recommended formats`;
+
+  const pipelineSteps = [
+    { from: 'chroma', to: 'prism', task: step1Task, priority: 'high' },
+    { from: 'prism', to: 'canvas', task: step2Task, priority: 'high' }
+  ];
+
+  // Execute pipeline
+  try {
+    const pipelineRes = await fetch(`http://localhost:${config.port}/api/pipeline`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: `Competitor Brief: ${brandName}`,
+        steps: pipelineSteps,
+        sequential: true,
+        priority: 'high',
+        workMode: 'artifact'
+      })
+    });
+    const pipelineResult = await pipelineRes.json();
+    
+    res.json({
+      success: true,
+      pipelineId: pipelineResult.pipelineId,
+      taskId,
+      status: 'started',
+      steps: ['Prism (research)', 'Canvas (design brief)']
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// --- Deliverables API ---
+app.get('/api/marketing/deliverables', (req, res) => {
+  const { requestId } = req.query;
+  Array.from(marketingRequests.values()).forEach(syncMarketingRequest);
+  let list = Array.from(deliverables.values());
+  if (requestId) {
+    list = list.filter(d => d.requestId === requestId);
+  }
+  res.json({ deliverables: list, count: list.length });
+});
+
+app.post('/api/marketing/deliverables', (req, res) => {
+  const { requestId, name, type, url, content, notes } = req.body;
+  if (!requestId || !name) return res.status(400).json({ error: 'requestId and name required' });
+  
+  const id = `deliverable_${Date.now()}`;
+  const deliverable = {
+    id,
+    requestId,
+    name,
+    type: type || 'file',
+    url: url || '',
+    content: content || '',
+    notes: notes || '',
+    createdAt: new Date().toISOString()
+  };
+  
+  deliverables.set(id, deliverable);
+  // P0: Persist state
+  saveDeliverables();
+  addMarketingActivity('created', 'deliverable', id, { name, requestId });
+  res.json({ success: true, deliverable });
+});
+
+// --- Activity API ---
+app.get('/api/marketing/activity', (req, res) => {
+  const { limit = 50 } = req.query;
+  const activity = marketingActivity.slice(0, parseInt(limit));
+  res.json({ activity, count: activity.length });
+});
+
+// ==================== TASK BOARD API ====================
+const tasksFile = path.join(__dirname, 'data', 'tasks.json');
+
+function loadTasks() {
+  try {
+    if (fs.existsSync(tasksFile)) {
+      return JSON.parse(fs.readFileSync(tasksFile, 'utf8'));
+    }
+  } catch (e) {
+    console.error('Error loading tasks:', e);
+  }
+  return { tasks: [], columns: [], priorities: [], owners: [] };
+}
+
+function saveTasks(data) {
+  fs.writeFileSync(tasksFile, JSON.stringify(data, null, 2));
+}
+
+app.get('/api/tasks', (req, res) => {
+  const { client, column, owner, priority } = req.query;
+  const data = loadTasks();
+  let tasks = data.tasks;
+  
+  // Filter by client
+  if (client) {
+    tasks = tasks.filter(t => t.client === client);
+  }
+  // Filter by column
+  if (column) {
+    tasks = tasks.filter(t => t.column === column);
+  }
+  // Filter by owner
+  if (owner) {
+    tasks = tasks.filter(t => t.owner === owner);
+  }
+  // Filter by priority
+  if (priority) {
+    tasks = tasks.filter(t => t.priority === priority);
+  }
+  
+  res.json({ ...data, tasks });
+});
+
+app.post('/api/tasks', (req, res) => {
+  const { title, description, owner, priority, column = 'backlog', doneCriteria = '', criticChecklist = '', criticReviewed = false, client = null } = req.body;
+  const data = loadTasks();
+  const task = {
+    id: 'task_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+    title,
+    description: description || '',
+    owner: owner || 'unassigned',
+    priority: priority || 'medium',
+    column,
+    doneCriteria: doneCriteria || '',
+    criticChecklist: criticChecklist || '',
+    criticReviewed: !!criticReviewed,
+    client: client || null,  // Client association (unt, buddhas, chromapages, etc.)
+    blockers: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  data.tasks.push(task);
+  saveTasks(data);
+  res.json({ success: true, task });
+});
+
+app.put('/api/tasks/:id', (req, res) => {
+  const { id } = req.params;
+  const { title, description, owner, priority, column, doneCriteria, criticChecklist, criticReviewed, blockers, client } = req.body;
+  const data = loadTasks();
+  const taskIndex = data.tasks.findIndex(t => t.id === id);
+  if (taskIndex === -1) {
+    return res.status(404).json({ error: 'Task not found' });
+  }
+  const task = data.tasks[taskIndex];
+  if (title !== undefined) task.title = title;
+  if (description !== undefined) task.description = description;
+  if (owner !== undefined) task.owner = owner;
+  if (priority !== undefined) task.priority = priority;
+  if (column !== undefined) task.column = column;
+  if (doneCriteria !== undefined) task.doneCriteria = doneCriteria;
+  if (criticChecklist !== undefined) task.criticChecklist = criticChecklist;
+  if (criticReviewed !== undefined) task.criticReviewed = !!criticReviewed;
+  if (blockers !== undefined) task.blockers = blockers;
+  if (client !== undefined) task.client = client;
+  task.updatedAt = new Date().toISOString();
+  data.tasks[taskIndex] = task;
+  saveTasks(data);
+  res.json({ success: true, task });
+});
+
+app.delete('/api/tasks/:id', (req, res) => {
+  const { id } = req.params;
+  const data = loadTasks();
+  const taskIndex = data.tasks.findIndex(t => t.id === id);
+  if (taskIndex === -1) {
+    return res.status(404).json({ error: 'Task not found' });
+  }
+  data.tasks.splice(taskIndex, 1);
+  saveTasks(data);
+  res.json({ success: true });
+});
+
+// Task column operations
+app.put('/api/tasks/:id/move', (req, res) => {
+  const { id } = req.params;
+  const { column } = req.body;
+  const data = loadTasks();
+  const task = data.tasks.find(t => t.id === id);
+  if (!task) {
+    return res.status(404).json({ error: 'Task not found' });
+  }
+  task.column = column;
+  task.updatedAt = new Date().toISOString();
+  saveTasks(data);
+  res.json({ success: true, task });
+});
+
+// Task blockers
+app.post('/api/tasks/:id/blockers', (req, res) => {
+  const { id } = req.params;
+  const { description } = req.body;
+  const data = loadTasks();
+  const task = data.tasks.find(t => t.id === id);
+  if (!task) {
+    return res.status(404).json({ error: 'Task not found' });
+  }
+  const blocker = {
+    id: 'blocker_' + Date.now(),
+    description,
+    createdAt: new Date().toISOString()
+  };
+  task.blockers = task.blockers || [];
+  task.blockers.push(blocker);
+  task.updatedAt = new Date().toISOString();
+  if (task.column !== 'blocked') {
+    task.column = 'blocked';
+  }
+  saveTasks(data);
+  res.json({ success: true, blocker });
+});
+
+app.delete('/api/tasks/:id/blockers/:blockerId', (req, res) => {
+  const { id, blockerId } = req.params;
+  const data = loadTasks();
+  const task = data.tasks.find(t => t.id === id);
+  if (!task) {
+    return res.status(404).json({ error: 'Task not found' });
+  }
+  task.blockers = (task.blockers || []).filter(b => b.id !== blockerId);
+  task.updatedAt = new Date().toISOString();
+  saveTasks(data);
+  res.json({ success: true });
+});
+
+// ==================== APPROVAL QUEUE ====================
+// Get all items pending review across tasks and marketing requests
+app.get('/api/approvals', (req, res) => {
+  const { client } = req.query;
+  const approvals = [];
+  
+  // Get tasks with pending_review status
+  let tasks = loadTasks().tasks.filter(t => t.column === 'pending_review');
+  if (client) tasks = tasks.filter(t => t.client === client);
+  tasks.forEach(t => {
+    approvals.push({
+      id: t.id,
+      type: 'task',
+      title: t.title,
+      description: t.description,
+      client: t.client,
+      priority: t.priority,
+      owner: t.owner,
+      doneCriteria: t.doneCriteria,
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt
+    });
+  });
+  
+  // Get marketing requests with pending_review status
+  let mktRequests = Array.from(marketingRequests.values()).filter(r => r.status === 'pending_review');
+  if (client) mktRequests = mktRequests.filter(r => r.client === client);
+  mktRequests.forEach(r => {
+    approvals.push({
+      id: r.id,
+      type: 'marketing_request',
+      title: r.title,
+      description: r.description,
+      client: r.client,
+      priority: r.priority,
+      brand: r.brandId,
+      type: r.type,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt
+    });
+  });
+  
+  // Sort by createdAt descending
+  approvals.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  
+  res.json({ approvals });
+});
+
+// Approve/reject a task
+app.post('/api/approvals/task/:id/approve', (req, res) => {
+  const { id } = req.params;
+  const data = loadTasks();
+  const task = data.tasks.find(t => t.id === id);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+  
+  task.column = 'done';
+  task.updatedAt = new Date().toISOString();
+  saveTasks(data);
+  res.json({ success: true, task });
+});
+
+app.post('/api/approvals/task/:id/reject', (req, res) => {
+  const { id } = req.params;
+  const { reason } = req.body;
+  const data = loadTasks();
+  const task = data.tasks.find(t => t.id === id);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+  
+  task.column = 'backlog';
+  task.blockers = task.blockers || [];
+  task.blockers.push({ id: 'rej_' + Date.now(), reason: reason || 'Rejected', createdAt: new Date().toISOString() });
+  task.updatedAt = new Date().toISOString();
+  saveTasks(data);
+  res.json({ success: true, task });
+});
+
+// ==================== CLIENT COMMAND VIEW ====================
+// Get full client details: tasks, handoffs, pipelines, cron
+app.get('/api/clients/:clientId', (req, res) => {
+  const { clientId } = req.params;
+  
+  // Get tasks for this client
+  const allTasks = loadTasks().tasks.filter(t => t.client === clientId);
+  
+  // Get handoffs for this client
+  const allHandoffs = Array.from(handoffs.values()).filter(h => h.client === clientId);
+  
+  // Get marketing requests for this client
+  const mktRequests = Array.from(marketingRequests.values()).filter(r => r.client === clientId);
+  
+  // Get deliverables for this client
+  const clientDeliverables = Array.from(deliverables.values()).filter(d => {
+    const req = marketingRequests.get(d.requestId);
+    return req && req.client === clientId;
+  });
+  
+  // Get schedules for this client (filter by name containing clientId)
+  const clientSchedules = Array.from(scheduledJobs.values()).filter(s => 
+    s.name.toLowerCase().includes(clientId.toLowerCase())
+  );
+  
+  // Stats
+  const stats = {
+    tasks: {
+      total: allTasks.length,
+      backlog: allTasks.filter(t => t.column === 'backlog').length,
+      todo: allTasks.filter(t => t.column === 'todo').length,
+      in_progress: allTasks.filter(t => t.column === 'in_progress').length,
+      pending_review: allTasks.filter(t => t.column === 'pending_review').length,
+      done: allTasks.filter(t => t.column === 'done').length,
+      blocked: allTasks.filter(t => t.column === 'blocked').length
+    },
+    handoffs: {
+      total: allHandoffs.length,
+      pending: allHandoffs.filter(h => h.status === 'pending').length,
+      in_progress: allHandoffs.filter(h => h.status === 'in_progress').length,
+      completed: allHandoffs.filter(h => h.status === 'completed').length,
+      failed: allHandoffs.filter(h => h.status === 'failed').length
+    },
+    deliverables: clientDeliverables.length,
+    pendingApprovals: allTasks.filter(t => t.column === 'pending_review').length + mktRequests.filter(r => r.status === 'pending_review').length
+  };
+  
+  res.json({
+    client: clientId,
+    stats,
+    tasks: allTasks.slice(-20), // Last 20
+    handoffs: allHandoffs.slice(-20), // Last 20
+    marketingRequests: mktRequests.slice(-10),
+    deliverables: clientDeliverables.slice(-10),
+    schedules: clientSchedules
+  });
+});
+
+// ==================== AGENT CONTROL PANEL ====================
+// Get agent status (idle vs active)
+app.get('/api/agents/status', (req, res) => {
+  const activeHandoffs = Array.from(handoffs.values()).filter(h => 
+    h.status === 'in_progress' || h.status === 'pending'
+  );
+  
+  const agentStatus = {};
+  Object.keys(config.agents).forEach(agentId => {
+    const agentHandoffs = activeHandoffs.filter(h => h.toAgent === agentId);
+    agentStatus[agentId] = {
+      status: agentHandoffs.length > 0 ? 'active' : 'idle',
+      activeCount: agentHandoffs.length,
+      currentTasks: agentHandoffs.map(h => ({
+        id: h.id,
+        task: h.task,
+        client: h.client,
+        status: h.status,
+        startedAt: h.startedAt
+      }))
+    };
+  });
+  
+  const summary = {
+    totalAgents: Object.keys(agentStatus).length,
+    active: Object.values(agentStatus).filter(a => a.status === 'active').length,
+    idle: Object.values(agentStatus).filter(a => a.status === 'idle').length
+  };
+  
+  res.json({ agents: agentStatus, summary });
+});
+
+// Dispatch task to any agent directly
+app.post('/api/dispatch', async (req, res) => {
+  const { toAgent, task, context, priority, client, targetPath } = req.body;
+  
+  if (!toAgent || !task) {
+    return res.status(400).json({ error: 'toAgent and task required' });
+  }
+  
+  if (!config.agents[toAgent]) {
+    return res.status(400).json({ error: `Unknown agent: ${toAgent}` });
+  }
+  
+  try {
+    const result = await createHandoff('chroma', toAgent, task, context || '', [], [], priority || 'medium', {
+      client: client || null,
+      targetPath: targetPath || null,
+      workdir: targetPath || null,
+      workMode: targetPath ? 'artifact' : 'memory'
+    });
+    
+    res.json({ success: true, handoff: result });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==================== END TASK BOARD API ====================
+
+// ==================== END MARKETING HUB API ====================
 
 server.listen(config.port, '0.0.0.0', () => {
   console.log(`🔄 Agent Handoff Manager v2.0 on port ${config.port}`);
