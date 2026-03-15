@@ -160,12 +160,36 @@ function getDb() {
         updated_at TEXT,
         FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE
       );
+      CREATE TABLE IF NOT EXISTS audit_events (
+        id TEXT PRIMARY KEY,
+        event_type TEXT NOT NULL,
+        entity_type TEXT,
+        entity_id TEXT,
+        client_id TEXT,
+        project_id TEXT,
+        actor TEXT,
+        details_json TEXT DEFAULT '{}',
+        created_at TEXT
+      );
       CREATE INDEX IF NOT EXISTS idx_handoffs_client_status ON handoffs(client, status);
       CREATE INDEX IF NOT EXISTS idx_tasks_client_column ON tasks(client, column_id);
       CREATE INDEX IF NOT EXISTS idx_projects_client_id ON projects(client_id);
+      CREATE INDEX IF NOT EXISTS idx_audit_client_project ON audit_events(client_id, project_id, created_at);
     `);
   }
   return persistenceDb;
+}
+
+function logAuditEvent({ eventType, entityType = null, entityId = null, clientId = null, projectId = null, actor = 'system', details = {} }) {
+  try {
+    const db = getDb();
+    const now = new Date().toISOString();
+    db.prepare(`INSERT INTO audit_events (id, event_type, entity_type, entity_id, client_id, project_id, actor, details_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(`audit_${Date.now()}_${Math.random().toString(36).slice(2,7)}`, eventType, entityType, entityId, clientId, projectId, actor, JSON.stringify(details || {}), now);
+  } catch (e) {
+    console.error('⚠️ Failed to write audit event:', e.message);
+  }
 }
 
 function upsertHandoffRecord(handoff) {
@@ -1595,6 +1619,11 @@ app.get('/project', (req, res) => {
   if (fs.existsSync(f)) return res.sendFile(f);
   res.redirect('/ops');
 });
+app.get('/reports', (req, res) => {
+  const f = path.join(__dirname, 'public', 'reports.html');
+  if (fs.existsSync(f)) return res.sendFile(f);
+  res.redirect('/ops');
+});
 app.get('/pipelines', (req, res) => {
   const f = path.join(__dirname, 'public', 'pipelines.html');
   if (fs.existsSync(f)) return res.sendFile(f);
@@ -2035,6 +2064,7 @@ app.post('/api/projects', (req, res) => {
       ON CONFLICT(id) DO UPDATE SET client_id=excluded.client_id, name=excluded.name, status=excluded.status, lead_agent=excluded.lead_agent, output_path=excluded.output_path, metadata_json=excluded.metadata_json, updated_at=excluded.updated_at`).run(
         projectId, clientId, name, status, leadAgent, outputPath, JSON.stringify(metadata || {}), now, now
       );
+    logAuditEvent({ eventType: 'project_created', entityType: 'project', entityId: projectId, clientId, projectId, actor: 'chroma', details: { name, status, leadAgent, outputPath, metadata } });
     res.json({ success: true, project: { id: projectId, clientId, name, status, leadAgent, outputPath, metadata, createdAt: now, updatedAt: now } });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -2141,6 +2171,45 @@ app.get('/api/ops/timeline', (req, res) => {
     }))
     .sort((a,b) => new Date(b.at) - new Date(a.at));
   res.json({ events });
+});
+
+app.get('/api/reports/summary', (req, res) => {
+  const { client, projectId } = req.query;
+  let audit = [];
+  try {
+    const db = getDb();
+    audit = db.prepare('SELECT * FROM audit_events ORDER BY created_at DESC LIMIT 250').all()
+      .map(r => ({ ...r, details: JSON.parse(r.details_json || '{}') }))
+      .filter(r => (!client || r.client_id === client) && (!projectId || r.project_id === projectId));
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+
+  const byType = {};
+  for (const ev of audit) byType[ev.event_type] = (byType[ev.event_type] || 0) + 1;
+  const recent = audit.slice(0, 50);
+  const deliveries = audit.filter(a => a.event_type === 'task_delivered').length;
+  const approvals = audit.filter(a => a.event_type === 'approval_approved').length;
+  const revisions = audit.filter(a => a.event_type === 'approval_revision_requested').length;
+  const rejections = audit.filter(a => a.event_type === 'approval_rejected').length;
+
+  res.json({ summary: { totalEvents: audit.length, deliveries, approvals, revisions, rejections, byType }, events: recent });
+});
+
+app.get('/api/reports/executive', (req, res) => {
+  const { client } = req.query;
+  const allHandoffs = Array.from(handoffs.values()).filter(h => !client || h.client === client);
+  const tasks = (loadTasks().tasks || []).filter(t => !client || t.client === client);
+  const projects = (() => { try { const db=getDb(); return db.prepare('SELECT * FROM projects ORDER BY updated_at DESC').all().filter(p => !client || p.client_id === client);} catch { return []; } })();
+  const report = {
+    deliveryRate: allHandoffs.length ? Math.round((allHandoffs.filter(h => h.status === 'completed').length / allHandoffs.length) * 100) : 0,
+    approvalQueue: tasks.filter(t => t.column === 'pending_review').length,
+    deliveredCount: tasks.filter(t => t.deliveryStatus === 'delivered').length,
+    blockedCount: tasks.filter(t => t.column === 'blocked' || (t.blockers && t.blockers.length)).length,
+    projectCount: projects.length,
+    activeProjectCount: projects.filter(p => p.status === 'active').length,
+  };
+  res.json({ report });
 });
 
 // ==================== END HEARTBEAT AWARENESS ====================
@@ -2262,8 +2331,10 @@ async function launchTemplatePipeline(template, { templateName, task, context, p
     };
     data.tasks.push(approvalTask);
     saveTasks(data);
+    logAuditEvent({ eventType: 'approval_created', entityType: 'task', entityId: approvalTask.id, clientId: resolvedClient, projectId: projectId || null, actor: 'chroma', details: { pipelineId, title: approvalTask.title, template: templateName } });
   }
 
+  logAuditEvent({ eventType: 'pipeline_launched', entityType: 'pipeline', entityId: pipelineId, clientId: resolvedClient, projectId: projectId || null, actor: 'chroma', details: { template: templateName, task, steps: template.steps.length, runAsync } });
   return { pipelineId, results, client: resolvedClient, projectId: projectId || null };
 }
 
@@ -4390,6 +4461,7 @@ async function completeHandoff(handoff) {
   }
 
   console.log(`✅ Completed: ${handoff.fromAgent} → ${handoff.toAgent}: ${handoff.task?.substring(0, 60)}`);
+  logAuditEvent({ eventType: 'handoff_completed', entityType: 'handoff', entityId: handoff.id, clientId: handoff.client || null, projectId: handoff.projectId || null, actor: handoff.toAgent || 'system', details: { finalOutcome: handoff.finalOutcome || null, pipelineId: handoff.pipelineId || null, artifacts: handoff.artifacts || [] } });
   sendDiscordNotification(handoff, 'completed');
   
   // P0: Persist state
@@ -5799,6 +5871,7 @@ app.post('/api/approvals/task/:id/approve', (req, res) => {
   task.approvedAt = new Date().toISOString();
   task.updatedAt = new Date().toISOString();
   saveTasks(data);
+  logAuditEvent({ eventType: 'approval_approved', entityType: 'task', entityId: task.id, clientId: task.client || null, projectId: task.projectId || null, actor: 'chroma', details: { pipelineId: task.pipelineId || null, title: task.title } });
   res.json({ success: true, task });
 });
 
@@ -5815,6 +5888,7 @@ app.post('/api/approvals/task/:id/reject', (req, res) => {
   task.blockers.push({ id: 'rej_' + Date.now(), reason: reason || 'Rejected', createdAt: new Date().toISOString() });
   task.updatedAt = new Date().toISOString();
   saveTasks(data);
+  logAuditEvent({ eventType: 'approval_rejected', entityType: 'task', entityId: task.id, clientId: task.client || null, projectId: task.projectId || null, actor: 'chroma', details: { pipelineId: task.pipelineId || null, title: task.title, reason: reason || 'Rejected' } });
   res.json({ success: true, task });
 });
 
@@ -5830,6 +5904,7 @@ app.post('/api/approvals/task/:id/revision', (req, res) => {
   task.blockers.push({ id: 'rev_' + Date.now(), reason: reason || 'Needs revision', createdAt: new Date().toISOString() });
   task.updatedAt = new Date().toISOString();
   saveTasks(data);
+  logAuditEvent({ eventType: 'approval_revision_requested', entityType: 'task', entityId: task.id, clientId: task.client || null, projectId: task.projectId || null, actor: 'chroma', details: { pipelineId: task.pipelineId || null, title: task.title, reason: reason || 'Needs revision' } });
   res.json({ success: true, task });
 });
 
@@ -5845,6 +5920,7 @@ app.post('/api/approvals/task/:id/deliver', (req, res) => {
   task.deliveryNote = note || null;
   task.updatedAt = new Date().toISOString();
   saveTasks(data);
+  logAuditEvent({ eventType: 'task_delivered', entityType: 'task', entityId: task.id, clientId: task.client || null, projectId: task.projectId || null, actor: 'chroma', details: { pipelineId: task.pipelineId || null, title: task.title, note: note || null } });
   res.json({ success: true, task });
 });
 
