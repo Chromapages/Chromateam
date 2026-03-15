@@ -26,12 +26,15 @@
     <button onclick="location.href='/dashboard'">←</button>
     <h1>MISSION CONTROL // OPS</h1>
     <div class="spacer"></div>
+    <button onclick="location.href='/reports'">Reports</button>
     <select id="clientFilter" onchange="loadAll()">
       <option value="">All clients</option>
       <option value="unt">UNT</option>
       <option value="buddhas">Buddha's</option>
       <option value="chromapages">Chromapages</option>
     </select>
+    <button onclick="runSmoke()">Smoke</button>
+    <button onclick="backupNow()">Backup</button>
     <button onclick="createProject()">+ Project</button>
   </div>
 
@@ -46,6 +49,7 @@
         <div class="stat"><div class="v" id="sBlocked">0</div><div class="l">Blocked</div></div>
         <div class="stat"><div class="v" id="sDone">0</div><div class="l">Done Today</div></div>
       </div>
+      <div id="quickStatus" class="small" style="margin-top:12px">Ready.</div>
     </div>
 
     <div class="panel">
@@ -106,7 +110,18 @@ async function createProject(){
   const name = prompt('Project name'); if(!name) return;
   const leadAgent = prompt('Lead agent', 'bender') || 'bender';
   const res = await j('/api/projects', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({clientId,name,leadAgent,status:'active',metadata:{createdFrom:'ops-ui'}})});
-  if(res.success) loadAll(); else alert(res.error||'Failed');
+  if(res.success){
+    document.getElementById('quickStatus').textContent = `Created project: ${name}`;
+    loadAll();
+  } else alert(res.error||'Failed');
+}
+async function runSmoke(){
+  const d = await j('/api/smoke');
+  document.getElementById('quickStatus').textContent = d.ok ? `Smoke OK • handoffs=${d.handoffCount} tasks=${d.taskCount} projects=${d.projectCount}` : `Smoke failed: ${d.error||'unknown error'}`;
+}
+async function backupNow(){
+  const d = await j('/api/persistence/backup', {method:'POST'});
+  document.getElementById('quickStatus').textContent = d.success ? `Backup created: ${d.dbBackup.split('/').pop()}` : `Backup failed: ${d.error||'unknown error'}`;
 }
 loadAll(); setInterval(loadAll, 30000);
 </script>
