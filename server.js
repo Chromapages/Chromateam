@@ -64,6 +64,7 @@ const app = express();
 // const handoffs = new Map(); // Now loaded from data/handoffs.json
 const agentContexts = new Map();
 const templates = new Map();
+const serviceTemplates = new Map();
 const feedback = new Map();
 const contextPackets = new Map(); // Explicit context packets for handoffs
 const taskHistory = []; // For similar task recall
@@ -1067,6 +1068,55 @@ function initTemplates() {
     steps: [
       { from: 'chroma', to: 'prism', task: '{task}', context: '{context}' },
       { from: 'prism', to: 'bender', task: 'Build: {task}', context: '{context}' }
+    ]
+  });
+
+  serviceTemplates.set('research', {
+    key: 'research',
+    name: 'Client Research Pipeline',
+    category: 'service',
+    requiresApproval: true,
+    approvalTitle: 'Review research deliverable',
+    steps: [
+      { from: 'chroma', to: 'prism', task: 'Research: {task}', context: '{context}' },
+      { from: 'prism', to: 'critic', task: 'Stress-test research findings for: {task}', context: '{context}' }
+    ]
+  });
+
+  serviceTemplates.set('marketing', {
+    key: 'marketing',
+    name: 'Marketing Delivery Pipeline',
+    category: 'service',
+    requiresApproval: true,
+    approvalTitle: 'Approve marketing deliverables',
+    steps: [
+      { from: 'chroma', to: 'prism', task: 'Research competitor and market context for: {task}', context: '{context}' },
+      { from: 'prism', to: 'pixel', task: 'Develop marketing direction for: {task}', context: '{context}' },
+      { from: 'pixel', to: 'canvas', task: 'Create visual/creative brief for: {task}', context: '{context}' }
+    ]
+  });
+
+  serviceTemplates.set('development', {
+    key: 'development',
+    name: 'Development Delivery Pipeline',
+    category: 'service',
+    requiresApproval: true,
+    approvalTitle: 'Approve development release',
+    steps: [
+      { from: 'chroma', to: 'bender', task: 'Implement: {task}', context: '{context}' },
+      { from: 'bender', to: 'code-reviewer', task: 'Review implementation for: {task}', context: '{context}' },
+      { from: 'code-reviewer', to: 'qa-tester', task: 'Validate and test: {task}', context: '{context}' }
+    ]
+  });
+
+  serviceTemplates.set('ops', {
+    key: 'ops',
+    name: 'Operations Delivery Pipeline',
+    category: 'service',
+    requiresApproval: false,
+    steps: [
+      { from: 'chroma', to: 'chief', task: 'Operationalize and document: {task}', context: '{context}' },
+      { from: 'chief', to: 'glyph', task: 'Apply workflow/automation support for: {task}', context: '{context}' }
     ]
   });
 
@@ -2086,10 +2136,110 @@ app.post('/api/templates', (req, res) => {
   res.json({ success: true, template: name });
 });
 
+app.get('/api/service-templates', (req, res) => {
+  res.json({ templates: Array.from(serviceTemplates.values()).map(t => ({
+    key: t.key,
+    name: t.name,
+    category: t.category,
+    requiresApproval: !!t.requiresApproval,
+    approvalTitle: t.approvalTitle || null,
+    stepCount: t.steps.length,
+    steps: t.steps,
+  })) });
+});
+
+function getProjectById(projectId) {
+  try {
+    const db = getDb();
+    const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
+    if (!row) return null;
+    return {
+      id: row.id,
+      clientId: row.client_id,
+      name: row.name,
+      status: row.status,
+      leadAgent: row.lead_agent,
+      outputPath: row.output_path,
+      metadata: JSON.parse(row.metadata_json || '{}'),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function launchTemplatePipeline(template, { templateName, task, context, priority, runAsync = true, targetPath, workdir, workMode, client, projectId }) {
+  const pipelineId = `pipeline_${Date.now()}`;
+  const results = [];
+  const project = projectId ? getProjectById(projectId) : null;
+  const resolvedClient = client || project?.clientId || null;
+  const resolvedTargetPath = targetPath || project?.outputPath || null;
+  let currentContext = context || '';
+
+  for (let i = 0; i < template.steps.length; i++) {
+    const step = template.steps[i];
+    const resolvedTask = step.task.replace('{task}', task || '');
+    const stepContextBase = step.context ? step.context.replace('{context}', currentContext) : currentContext;
+    const projectContext = project ? `\n\nProject: ${project.name} (${project.id})\nClient: ${project.clientId}` : '';
+    const resolvedContext = `${stepContextBase || ''}${projectContext}`.trim();
+
+    const result = await createHandoff(step.from, step.to, resolvedTask, resolvedContext, [], [], priority, {
+      pipelineId,
+      pipelineTemplate: templateName,
+      pipelineStep: i + 1,
+      pipelineTotalSteps: template.steps.length,
+      waitForComplete: !runAsync,
+      targetPath: resolvedTargetPath,
+      workdir: workdir || resolvedTargetPath,
+      workMode,
+      client: resolvedClient,
+      projectId: projectId || null,
+    });
+    results.push(result);
+
+    if (!runAsync) {
+      while (true) {
+        await new Promise(r => setTimeout(r, 2000));
+        const h = handoffs.get(result.handoffId);
+        if (!h || h.status === 'completed' || h.status === 'failed') {
+          if (h?.agentResponse) currentContext = `Previous step output:\n${h.agentResponse}\n\n---\n\nOriginal context: ${currentContext}`;
+          break;
+        }
+      }
+    }
+  }
+
+  if (template.requiresApproval) {
+    const data = loadTasks();
+    const approvalTask = {
+      id: `approval_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+      title: template.approvalTitle || `Approve ${template.name}`,
+      description: `Pipeline ${pipelineId} for ${task}${project ? `\nProject: ${project.name}` : ''}`,
+      owner: 'chroma',
+      priority: priority || 'high',
+      column: 'pending_review',
+      doneCriteria: 'Review deliverables, confirm artifacts, approve or request revision',
+      criticChecklist: 'Check artifacts, response quality, and client/project fit before approval.',
+      criticReviewed: false,
+      client: resolvedClient,
+      projectId: projectId || null,
+      pipelineId,
+      blockers: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    data.tasks.push(approvalTask);
+    saveTasks(data);
+  }
+
+  return { pipelineId, results, client: resolvedClient, projectId: projectId || null };
+}
+
 // Execute a template as a sequential pipeline (waits for each step to complete)
 app.post('/api/template/:name/execute', async (req, res) => {
   const { name } = req.params;
-  const { task, context, priority, runAsync = false, targetPath, workdir, workMode } = req.body;
+  const { task, context, priority, runAsync = false, targetPath, workdir, workMode, client, projectId } = req.body;
   const template = templates.get(name);
 
   if (!template) return res.status(404).json({ error: 'Template not found' });
@@ -2099,66 +2249,19 @@ app.post('/api/template/:name/execute', async (req, res) => {
     return res.status(400).json({ error: executionTargetError });
   }
 
-  const pipelineId = `pipeline_${Date.now()}`;
-  const results = [];
+  const launched = await launchTemplatePipeline(template, { templateName: name, task, context, priority, runAsync, targetPath, workdir, workMode, client, projectId });
+  res.json({ success: true, template: name, pipelineId: launched.pipelineId, executed: launched.results.length, results: launched.results, client: launched.client, projectId: launched.projectId });
+});
 
-  if (runAsync) {
-    // Run async - create all handoffs and return immediately
-    for (let i = 0; i < template.steps.length; i++) {
-      const step = template.steps[i];
-      const resolvedTask = step.task.replace('{task}', task || '');
-      const resolvedContext = step.context ? step.context.replace('{context}', context || '') : context;
-
-      const result = await createHandoff(step.from, step.to, resolvedTask, resolvedContext, [], [], priority, {
-        pipelineId,
-        pipelineStep: i + 1,
-        pipelineTotalSteps: template.steps.length,
-        targetPath,
-        workdir,
-        workMode,
-      });
-      results.push(result);
-    }
-    res.json({ success: true, template: name, pipelineId, executed: results.length, results });
-  } else {
-    // Run sequential - wait for each step to complete before starting next
-    let currentContext = context || '';
-
-    for (let i = 0; i < template.steps.length; i++) {
-      const step = template.steps[i];
-      const resolvedTask = step.task.replace('{task}', task || '');
-      const resolvedContext = step.context
-        ? step.context.replace('{context}', currentContext)
-        : currentContext;
-
-      // Create and wait for this handoff
-      const result = await createHandoff(step.from, step.to, resolvedTask, resolvedContext, [], [], priority, {
-        pipelineId,
-        pipelineStep: i + 1,
-        pipelineTotalSteps: template.steps.length,
-        waitForComplete: true,
-        targetPath,
-        workdir,
-        workMode,
-      });
-      results.push(result);
-
-      // Wait for the agent to complete (poll for status)
-      console.log(`⏳ Waiting for step ${i + 1}/${template.steps.length} to complete...`);
-      while (true) {
-        await new Promise(r => setTimeout(r, 2000));
-        const h = handoffs.get(result.handoffId);
-        if (!h || h.status === 'completed' || h.status === 'failed') {
-          if (h?.agentResponse) {
-            currentContext = `Previous step output:\n${h.agentResponse}\n\n---\n\nOriginal context: ${currentContext}`;
-          }
-          break;
-        }
-      }
-    }
-
-    res.json({ success: true, template: name, pipelineId, executed: results.length, results });
-  }
+app.post('/api/service-template/:name/launch', async (req, res) => {
+  const { name } = req.params;
+  const { task, context, priority = 'high', runAsync = true, targetPath, workdir, workMode, client, projectId } = req.body;
+  const template = serviceTemplates.get(name);
+  if (!template) return res.status(404).json({ error: 'Service template not found' });
+  const executionTargetError = validateExecutionTargetInput({ targetPath, workdir, workMode });
+  if (executionTargetError) return res.status(400).json({ error: executionTargetError });
+  const launched = await launchTemplatePipeline(template, { templateName: name, task, context, priority, runAsync, targetPath, workdir, workMode, client, projectId });
+  res.json({ success: true, template: name, pipelineId: launched.pipelineId, executed: launched.results.length, results: launched.results, client: launched.client, projectId: launched.projectId, requiresApproval: !!template.requiresApproval });
 });
 
 // ==================== HANDOFF CORE ====================
@@ -5420,6 +5523,15 @@ function loadTasks() {
   try {
     const db = getDb();
     seedClientProjectDefaults(db);
+
+    // Always attempt to merge any JSON-backed tasks into sqlite first
+    if (fs.existsSync(tasksFile)) {
+      try {
+        const diskData = JSON.parse(fs.readFileSync(tasksFile, 'utf8'));
+        for (const t of (diskData.tasks || [])) upsertTaskRecord(t);
+      } catch {}
+    }
+
     const rows = db.prepare('SELECT json FROM tasks ORDER BY created_at ASC').all();
     if (rows.length > 0) {
       const tasks = rows.map(r => JSON.parse(r.json));
@@ -5438,11 +5550,7 @@ function loadTasks() {
     if (fs.existsSync(tasksFile)) {
       const data = JSON.parse(fs.readFileSync(tasksFile, 'utf8'));
       try {
-        const db = getDb();
-        const tx = db.transaction((rows) => {
-          for (const t of rows) upsertTaskRecord(t);
-        });
-        tx(data.tasks || []);
+        for (const t of (data.tasks || [])) upsertTaskRecord(t);
       } catch (e) {
         console.error('Error migrating tasks to sqlite:', e.message);
       }
@@ -5457,11 +5565,7 @@ function loadTasks() {
 function saveTasks(data) {
   fs.writeFileSync(tasksFile, JSON.stringify(data, null, 2));
   try {
-    const db = getDb();
-    const tx = db.transaction((rows) => {
-      for (const t of rows) upsertTaskRecord(t);
-    });
-    tx(data.tasks || []);
+    for (const t of (data.tasks || [])) upsertTaskRecord(t);
   } catch (e) {
     console.error('Error saving tasks to sqlite:', e.message);
   }
@@ -5660,6 +5764,8 @@ app.post('/api/approvals/task/:id/approve', (req, res) => {
   if (!task) return res.status(404).json({ error: 'Task not found' });
   
   task.column = 'done';
+  task.approvalStatus = 'approved';
+  task.approvedAt = new Date().toISOString();
   task.updatedAt = new Date().toISOString();
   saveTasks(data);
   res.json({ success: true, task });
@@ -5672,9 +5778,25 @@ app.post('/api/approvals/task/:id/reject', (req, res) => {
   const task = data.tasks.find(t => t.id === id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
   
-  task.column = 'backlog';
+  task.column = 'blocked';
+  task.approvalStatus = 'rejected';
   task.blockers = task.blockers || [];
   task.blockers.push({ id: 'rej_' + Date.now(), reason: reason || 'Rejected', createdAt: new Date().toISOString() });
+  task.updatedAt = new Date().toISOString();
+  saveTasks(data);
+  res.json({ success: true, task });
+});
+
+app.post('/api/approvals/task/:id/revision', (req, res) => {
+  const { id } = req.params;
+  const { reason } = req.body;
+  const data = loadTasks();
+  const task = data.tasks.find(t => t.id === id);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+  task.column = 'backlog';
+  task.approvalStatus = 'needs_revision';
+  task.blockers = task.blockers || [];
+  task.blockers.push({ id: 'rev_' + Date.now(), reason: reason || 'Needs revision', createdAt: new Date().toISOString() });
   task.updatedAt = new Date().toISOString();
   saveTasks(data);
   res.json({ success: true, task });

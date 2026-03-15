@@ -286,6 +286,7 @@
             <div class="approval-meta">Created ${timeAgo} • Owner: ${a.owner || 'unassigned'}</div>
             <div class="approval-actions">
               <button class="btn btn-approve" onclick="approve('${a.id}', '${a.type}')">Approve</button>
+              <button class="btn btn-reject" onclick="revise('${a.id}', '${a.type}')">Needs Revision</button>
               <button class="btn btn-reject" onclick="reject('${a.id}', '${a.type}')">Reject</button>
             </div>
           </div>
@@ -330,6 +331,25 @@
         }
       } catch (e) {
         console.error('Failed to reject:', e);
+      }
+    }
+
+    async function revise(id, type) {
+      if (type !== 'task') {
+        alert('Only task revision requests supported for now');
+        return;
+      }
+      const reason = prompt('Revision reason (optional):');
+      try {
+        const res = await fetch(`/api/approvals/task/${id}/revision`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ reason })
+        });
+        const data = await res.json();
+        if (data.success) loadApprovals();
+      } catch (e) {
+        console.error('Failed to request revision:', e);
       }
     }
 
