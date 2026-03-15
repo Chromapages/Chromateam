@@ -171,10 +171,30 @@ function getDb() {
         details_json TEXT DEFAULT '{}',
         created_at TEXT
       );
+      CREATE TABLE IF NOT EXISTS run_summaries (
+        id TEXT PRIMARY KEY,
+        project_id TEXT,
+        pipeline_id TEXT NOT NULL,
+        client TEXT,
+        summary_json TEXT NOT NULL,
+        created_at TEXT
+      );
+      CREATE TABLE IF NOT EXISTS approval_revisions (
+        id TEXT PRIMARY KEY,
+        approval_id TEXT NOT NULL,
+        revision_count INTEGER DEFAULT 1,
+        notes TEXT,
+        prior_artifacts_json TEXT DEFAULT '[]',
+        new_handoff_id TEXT,
+        created_at TEXT
+      );
       CREATE INDEX IF NOT EXISTS idx_handoffs_client_status ON handoffs(client, status);
       CREATE INDEX IF NOT EXISTS idx_tasks_client_column ON tasks(client, column_id);
       CREATE INDEX IF NOT EXISTS idx_projects_client_id ON projects(client_id);
       CREATE INDEX IF NOT EXISTS idx_audit_client_project ON audit_events(client_id, project_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_run_summaries_pipeline ON run_summaries(pipeline_id);
+      CREATE INDEX IF NOT EXISTS idx_run_summaries_project ON run_summaries(project_id);
+      CREATE INDEX IF NOT EXISTS idx_approval_revisions_approval ON approval_revisions(approval_id);
     `);
   }
   return persistenceDb;
@@ -1307,6 +1327,11 @@ async function retryHandoff(handoff) {
     handoff.retryMeta.attempts = currentAttempt;
     triggerWebhooks('HandoffFailed', handoff);
     saveHandoffs();
+    // A2/A3: Alert Discord on pipeline failure or blocked handoff
+    if (handoff.pipelineId) {
+      postDiscordAlert('pipeline_failed', { pipelineId: handoff.pipelineId, client: handoff.client, handoffId: handoff.id, toAgent: handoff.toAgent, reason: handoff.error }).catch(() => {});
+    }
+    postDiscordAlert('blocked', { handoffId: handoff.id, task: handoff.task, toAgent: handoff.toAgent, client: handoff.client, error: handoff.error }).catch(() => {});
     return;
   }
 
@@ -1561,7 +1586,7 @@ async function postCompetitorResults(handoff) {
       embed.fields.push({ name: 'Research Focus', value: handoff.task.substring(0, 150) });
     }
     
-    const message = `## 🔍 Competitive Intelligence Report\nResearch completed. View full results in AHM dashboard.`;
+    const message = `## 🔍 Competitive Intelligence Report\nResearch completed. View full results in CRM.`;
     
     await postToChannel(channelId, message, embed);
   } catch (error) {
@@ -1590,29 +1615,26 @@ app.get('/offline', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'offline.html'));
 });
 
-// Page routes — must be before express.static so /crm, /dashboard, etc. are matched first
-app.get('/dashboard', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
-});
+// Page routes — must be before express.static so /crm, etc. are matched first
 app.get('/agents', (req, res) => {
   const f = path.join(__dirname, 'public', 'agents.html');
   if (fs.existsSync(f)) return res.sendFile(f);
-  res.redirect('/dashboard');
+  res.redirect('/crm');
 });
 app.get('/approvals', (req, res) => {
   const f = path.join(__dirname, 'public', 'approvals.html');
   if (fs.existsSync(f)) return res.sendFile(f);
-  res.redirect('/dashboard');
+  res.redirect('/crm');
 });
 app.get('/client', (req, res) => {
   const f = path.join(__dirname, 'public', 'client.html');
   if (fs.existsSync(f)) return res.sendFile(f);
-  res.redirect('/dashboard');
+  res.redirect('/crm');
 });
 app.get('/ops', (req, res) => {
   const f = path.join(__dirname, 'public', 'ops.html');
   if (fs.existsSync(f)) return res.sendFile(f);
-  res.redirect('/dashboard');
+  res.redirect('/crm');
 });
 app.get('/project', (req, res) => {
   const f = path.join(__dirname, 'public', 'project.html');
@@ -1627,38 +1649,38 @@ app.get('/reports', (req, res) => {
 app.get('/pipelines', (req, res) => {
   const f = path.join(__dirname, 'public', 'pipelines.html');
   if (fs.existsSync(f)) return res.sendFile(f);
-  res.redirect('/dashboard');
+  res.redirect('/crm');
 });
 app.get('/logs', (req, res) => {
   const f = path.join(__dirname, 'public', 'logs.html');
   if (fs.existsSync(f)) return res.sendFile(f);
-  res.redirect('/dashboard');
+  res.redirect('/crm');
 });
 app.get('/settings', (req, res) => {
   const f = path.join(__dirname, 'public', 'settings.html');
   if (fs.existsSync(f)) return res.sendFile(f);
-  res.redirect('/dashboard');
+  res.redirect('/crm');
 });
 app.get('/office', (req, res) => {
   const f = path.join(__dirname, 'public', 'office.html');
   if (fs.existsSync(f)) return res.sendFile(f);
-  res.redirect('/dashboard');
+  res.redirect('/crm');
 });
 app.get('/crm', (req, res) => {
   const f = path.join(__dirname, 'public', 'crm.html');
   if (fs.existsSync(f)) return res.sendFile(f);
-  res.redirect('/dashboard');
+  res.redirect('/crm');
 });
 app.get('/marketing', (req, res) => {
   const f = path.join(__dirname, 'public', 'marketing.html');
   if (fs.existsSync(f)) return res.sendFile(f);
-  res.redirect('/dashboard');
+  res.redirect('/crm');
 });
 
 app.get('/tasks', (req, res) => {
   const f = path.join(__dirname, 'public', 'tasks.html');
   if (fs.existsSync(f)) return res.sendFile(f);
-  res.redirect('/dashboard');
+  res.redirect('/crm');
 });
 
 // Serve static files from public directory
@@ -1686,8 +1708,8 @@ app.get('/', (req, res) => {
     version: '2.1',
     endpoints: {
       health: '/health',
-      dashboard: '/api/dashboard',
-      dashboardVisual: '/dashboard',
+      crm: '/api/crm',
+      crmVisual: '/crm',
       agents: '/api/agents',
       status: '/api/agents/:id/status',
       templates: '/api/templates',
@@ -2378,6 +2400,8 @@ async function launchTemplatePipeline(template, { templateName, task, context, p
     data.tasks.push(approvalTask);
     saveTasks(data);
     logAuditEvent({ eventType: 'approval_created', entityType: 'task', entityId: approvalTask.id, clientId: resolvedClient, projectId: projectId || null, actor: 'chroma', details: { pipelineId, title: approvalTask.title, template: templateName } });
+    // A1: Approval-ready Discord alert
+    postDiscordAlert('approval_ready', { client: resolvedClient, projectId, pipelineId, title: approvalTask.title, approvalId: approvalTask.id }).catch(() => {});
   }
 
   logAuditEvent({ eventType: 'pipeline_launched', entityType: 'pipeline', entityId: pipelineId, clientId: resolvedClient, projectId: projectId || null, actor: 'chroma', details: { template: templateName, task, steps: template.steps.length, runAsync } });
@@ -4892,6 +4916,8 @@ async function processHandoff(handoff) {
         console.log(`🏁 Pipeline ${pipelineId} complete — all ${pipelineTotalSteps} steps done`);
         const pipelineHandoffs = Array.from(handoffs.values()).filter(h => h.pipelineId === pipelineId);
         triggerWebhooks('PipelineComplete', { pipelineId, handoffs: pipelineHandoffs });
+        // E1: Generate and save run summary
+        saveRunSummary(pipelineId, pipelineHandoffs);
       }
     }
   } catch (err) {
@@ -6123,9 +6149,571 @@ app.post('/api/dispatch', async (req, res) => {
 
 // ==================== END MARKETING HUB API ====================
 
+// ==================== PHASE A: DISCORD NOTIFICATIONS ====================
+
+const AHM_BASE_URL = process.env.AHM_BASE_URL || `http://localhost:${config.port}`;
+
+async function postDiscordAlert(type, data = {}) {
+  if (!config.discord?.webhookUrl) return;
+  try {
+    let embed;
+    switch (type) {
+      case 'approval_ready': {
+        embed = {
+          title: '✅ Approval Required',
+          color: 0xF59E0B, // amber
+          fields: [
+            { name: 'Task', value: data.title || 'Pipeline review', inline: false },
+            { name: 'Client', value: data.client || '—', inline: true },
+            { name: 'Pipeline', value: data.pipelineId || '—', inline: true },
+            { name: 'Link', value: `${AHM_BASE_URL}/approvals`, inline: false }
+          ],
+          timestamp: new Date().toISOString()
+        };
+        break;
+      }
+      case 'pipeline_failed': {
+        embed = {
+          title: '❌ Pipeline Failed',
+          color: 0xEF4444, // red
+          fields: [
+            { name: 'Pipeline', value: data.pipelineId || '—', inline: true },
+            { name: 'Client', value: data.client || '—', inline: true },
+            { name: 'Agent', value: data.toAgent || '—', inline: true },
+            { name: 'Reason', value: (data.reason || 'Unknown').substring(0, 200), inline: false },
+            { name: 'Link', value: data.projectId ? `${AHM_BASE_URL}/project.html?id=${data.projectId}` : `${AHM_BASE_URL}/pipelines`, inline: false }
+          ],
+          timestamp: new Date().toISOString()
+        };
+        break;
+      }
+      case 'blocked': {
+        embed = {
+          title: '🚫 Handoff Blocked',
+          color: 0xEF4444,
+          fields: [
+            { name: 'Agent', value: data.toAgent || '—', inline: true },
+            { name: 'Client', value: data.client || '—', inline: true },
+            { name: 'Task', value: (data.task || '—').substring(0, 100), inline: false },
+            { name: 'Error', value: (data.error || 'Retry limit exceeded').substring(0, 200), inline: false },
+            { name: 'Link', value: `${AHM_BASE_URL}/logs.html`, inline: false }
+          ],
+          timestamp: new Date().toISOString()
+        };
+        break;
+      }
+      case 'daily_summary': {
+        const { completed, approvals, active, failures, date } = data;
+        embed = {
+          title: `📊 Daily Summary — ${date || new Date().toLocaleDateString()}`,
+          color: 0x3B82F6, // blue
+          fields: [
+            { name: 'Runs Completed', value: String(completed || 0), inline: true },
+            { name: 'Active Projects', value: String(active || 0), inline: true },
+            { name: 'Approvals Pending', value: String(approvals || 0), inline: true },
+            { name: 'Failures', value: String(failures || 0), inline: true },
+            { name: 'Dashboard', value: `${AHM_BASE_URL}/dashboard`, inline: false }
+          ],
+          timestamp: new Date().toISOString()
+        };
+        break;
+      }
+      case 'stalled': {
+        embed = {
+          title: '⏸️ Project Stalled',
+          color: 0x8B5CF6, // purple
+          fields: [
+            { name: 'Project', value: data.projectName || data.projectId || '—', inline: true },
+            { name: 'Client', value: data.client || '—', inline: true },
+            { name: 'Last Activity', value: data.lastActivity || '—', inline: true },
+            { name: 'Days Inactive', value: String(data.daysInactive || '?'), inline: true },
+            { name: 'Link', value: data.projectId ? `${AHM_BASE_URL}/project.html?id=${data.projectId}` : `${AHM_BASE_URL}/ops.html`, inline: false }
+          ],
+          timestamp: new Date().toISOString()
+        };
+        break;
+      }
+      default: {
+        embed = { title: `AHM Alert: ${type}`, color: 0x52525B, fields: [{ name: 'Data', value: JSON.stringify(data).substring(0, 200) }], timestamp: new Date().toISOString() };
+      }
+    }
+    await fetch(config.discord.webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'AHM Alerts', embeds: [embed] })
+    });
+  } catch (err) {
+    console.warn(`[Discord] Alert failed (${type}):`, err.message);
+  }
+}
+
+// A1: Manual approval-ready trigger
+app.post('/api/notifications/approval-ready', async (req, res) => {
+  const { client, projectId, pipelineId, title, approvalId } = req.body;
+  await postDiscordAlert('approval_ready', { client, projectId, pipelineId, title, approvalId });
+  res.json({ ok: true });
+});
+
+// A2: Manual pipeline-failed trigger
+app.post('/api/notifications/pipeline-failed', async (req, res) => {
+  const { pipelineId, client, reason, projectId, toAgent } = req.body;
+  await postDiscordAlert('pipeline_failed', { pipelineId, client, reason, projectId, toAgent });
+  res.json({ ok: true });
+});
+
+// A3: Manual blocked trigger
+app.post('/api/notifications/blocked', async (req, res) => {
+  const { handoffId, task, toAgent, client, error } = req.body;
+  await postDiscordAlert('blocked', { handoffId, task, toAgent, client, error });
+  res.json({ ok: true });
+});
+
+// A4: Daily summary — build from live data and post
+app.post('/api/notifications/daily-summary', async (req, res) => {
+  try {
+    const db = getDb();
+    const today = new Date().toISOString().slice(0, 10);
+    const allHandoffs = Array.from(handoffs.values());
+    const todayHandoffs = allHandoffs.filter(h => (h.completedAt || h.createdAt || '').startsWith(today));
+    const completed = todayHandoffs.filter(h => h.status === 'completed').length;
+    const failures = todayHandoffs.filter(h => h.status === 'failed').length;
+    const active = db.prepare(`SELECT COUNT(*) as c FROM projects WHERE status = 'active'`).get()?.c || 0;
+    const approvals = (loadTasks().tasks || []).filter(t => t.column === 'pending_review').length;
+    await postDiscordAlert('daily_summary', { completed, failures, active, approvals, date: today });
+    res.json({ ok: true, completed, failures, active, approvals });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// A5: Stalled project check — projects with no activity in X days
+app.get('/api/notifications/stalled-check', async (req, res) => {
+  try {
+    const daysThreshold = parseInt(req.query.days || '3', 10);
+    const cutoff = new Date(Date.now() - daysThreshold * 86400000).toISOString();
+    const db = getDb();
+    const projects = db.prepare(`SELECT * FROM projects WHERE status = 'active'`).all();
+    const stalled = [];
+    for (const row of projects) {
+      const meta = JSON.parse(row.metadata_json || '{}');
+      const lastHandoff = Array.from(handoffs.values())
+        .filter(h => h.projectId === row.id || h.client === row.client_id)
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0];
+      const lastActivity = lastHandoff?.completedAt || lastHandoff?.createdAt || row.created_at;
+      if (lastActivity < cutoff) {
+        const daysInactive = Math.floor((Date.now() - new Date(lastActivity).getTime()) / 86400000);
+        stalled.push({ projectId: row.id, projectName: row.name, client: row.client_id, lastActivity, daysInactive });
+        await postDiscordAlert('stalled', { projectId: row.id, projectName: row.name, client: row.client_id, lastActivity, daysInactive });
+      }
+    }
+    res.json({ checked: projects.length, stalled: stalled.length, projects: stalled });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ==================== PHASE B: PROJECT TEMPLATES ====================
+
+const PROJECT_TEMPLATES_FILE = path.join(__dirname, 'data', 'project-templates.json');
+
+function loadProjectTemplates() {
+  if (fs.existsSync(PROJECT_TEMPLATES_FILE)) {
+    try { return JSON.parse(fs.readFileSync(PROJECT_TEMPLATES_FILE, 'utf8')); } catch {}
+  }
+  return {};
+}
+
+function saveProjectTemplates(data) {
+  fs.writeFileSync(PROJECT_TEMPLATES_FILE, JSON.stringify(data, null, 2));
+}
+
+app.get('/api/project-templates', (req, res) => {
+  const tmpl = loadProjectTemplates();
+  res.json({ templates: Object.entries(tmpl).map(([id, t]) => ({ id, ...t })) });
+});
+
+app.post('/api/project-templates', (req, res) => {
+  const { id, name, clientId, pipeline, approvalRequired, deliverableFolders, steps, metadata } = req.body;
+  if (!id || !name) return res.status(400).json({ error: 'id and name required' });
+  const tmpl = loadProjectTemplates();
+  tmpl[id] = { name, clientId, pipeline, approvalRequired: !!approvalRequired, deliverableFolders: deliverableFolders || [], steps: steps || [], metadata: metadata || {} };
+  saveProjectTemplates(tmpl);
+  res.json({ ok: true, id, template: tmpl[id] });
+});
+
+app.post('/api/project-templates/:templateId/launch', async (req, res) => {
+  const { templateId } = req.params;
+  const { task, clientId: bodyClientId, projectName, targetPath } = req.body;
+  const tmpl = loadProjectTemplates();
+  const template = tmpl[templateId];
+  if (!template) return res.status(404).json({ error: 'Project template not found' });
+
+  try {
+    const db = getDb();
+    const resolvedClient = bodyClientId || template.clientId || null;
+    const now = new Date().toISOString();
+
+    // Create project record
+    const projectId = `proj_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const projName = projectName || `${template.name} — ${new Date().toLocaleDateString()}`;
+    const resolvedPath = targetPath || (resolvedClient ? `${DEFAULT_OUTPUT_DIR}/${resolvedClient}/${projectId}` : null);
+    db.prepare(`INSERT INTO projects (id, client_id, name, status, lead_agent, output_path, metadata_json, created_at, updated_at)
+      VALUES (?, ?, ?, 'active', 'chroma', ?, ?, ?, ?)`)
+      .run(projectId, resolvedClient, projName, resolvedPath, JSON.stringify(template.metadata || {}), now, now);
+
+    // Create deliverable folders
+    const foldersCreated = [];
+    for (const folder of (template.deliverableFolders || [])) {
+      const fullPath = folder.startsWith('/') ? folder : path.join(resolvedPath || DEFAULT_OUTPUT_DIR, folder);
+      try { fs.mkdirSync(fullPath, { recursive: true }); foldersCreated.push(fullPath); } catch {}
+    }
+
+    // Launch the service pipeline if configured
+    let pipelineId = null;
+    if (template.pipeline && serviceTemplates.has(template.pipeline)) {
+      const svcTemplate = serviceTemplates.get(template.pipeline);
+      const launched = await launchTemplatePipeline(svcTemplate, {
+        templateName: template.pipeline,
+        task: task || `${template.name} execution`,
+        context: `Project: ${projName} (${projectId})\nClient: ${resolvedClient}`,
+        priority: 'high',
+        runAsync: true,
+        targetPath: resolvedPath,
+        client: resolvedClient,
+        projectId
+      });
+      pipelineId = launched.pipelineId;
+    }
+
+    logAuditEvent({ eventType: 'project_template_launched', entityType: 'project', entityId: projectId, clientId: resolvedClient, projectId, actor: 'chroma', details: { templateId, template: template.name, pipelineId, foldersCreated } });
+    res.json({ ok: true, projectId, pipelineId, name: projName, client: resolvedClient, foldersCreated });
+  } catch (e) {
+    console.error('[Template Launch]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ==================== PHASE C: ARTIFACT BROWSER ====================
+
+app.get('/api/artifacts', (req, res) => {
+  try {
+    const { projectId, pipelineId, client } = req.query;
+    const all = Array.from(handoffs.values());
+    let filtered = all;
+    if (projectId) filtered = filtered.filter(h => h.projectId === projectId);
+    if (pipelineId) filtered = filtered.filter(h => h.pipelineId === pipelineId);
+    if (client) filtered = filtered.filter(h => h.client === client);
+
+    const artifacts = [];
+    for (const h of filtered) {
+      // Collect artifact paths from executionTarget
+      const artifactPath = h.executionTarget?.artifactPath;
+      if (artifactPath) {
+        let size = null, preview = null, type = 'text';
+        try {
+          if (fs.existsSync(artifactPath)) {
+            const stat = fs.statSync(artifactPath);
+            size = stat.size;
+            const ext = path.extname(artifactPath).toLowerCase();
+            if (['.md', '.txt'].includes(ext)) { type = 'markdown'; try { preview = fs.readFileSync(artifactPath, 'utf8').substring(0, 500); } catch {} }
+            else if (['.js', '.ts', '.tsx', '.py', '.json', '.html', '.css'].includes(ext)) { type = 'code'; try { preview = fs.readFileSync(artifactPath, 'utf8').substring(0, 500); } catch {} }
+            else if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'].includes(ext)) type = 'image';
+          }
+        } catch {}
+        artifacts.push({
+          path: artifactPath,
+          type,
+          size,
+          preview,
+          verified: h.status === 'completed',
+          pipelineId: h.pipelineId,
+          handoffId: h.id,
+          projectId: h.projectId,
+          client: h.client,
+          fromAgent: h.fromAgent,
+          toAgent: h.toAgent,
+          createdAt: h.completedAt || h.createdAt,
+          filename: path.basename(artifactPath)
+        });
+      }
+      // Response file
+      if (h.responseFile) {
+        artifacts.push({
+          path: h.responseFile,
+          type: 'response',
+          size: null,
+          preview: null,
+          verified: false,
+          pipelineId: h.pipelineId,
+          handoffId: h.id,
+          projectId: h.projectId,
+          client: h.client,
+          createdAt: h.completedAt || h.createdAt,
+          filename: path.basename(h.responseFile)
+        });
+      }
+    }
+
+    // Group by pipeline
+    const byPipeline = {};
+    for (const a of artifacts) {
+      const key = a.pipelineId || 'standalone';
+      if (!byPipeline[key]) byPipeline[key] = [];
+      byPipeline[key].push(a);
+    }
+
+    res.json({ artifacts, byPipeline, total: artifacts.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Artifact content endpoint (for preview)
+app.get('/api/artifacts/content', (req, res) => {
+  const { path: artifactPath } = req.query;
+  if (!artifactPath) return res.status(400).json({ error: 'path required' });
+  // Security: only serve files within the output directory
+  const resolved = path.resolve(artifactPath);
+  const allowedRoot = path.resolve(DEFAULT_OUTPUT_DIR);
+  const uploadsRoot = path.resolve(uploadsDir);
+  if (!resolved.startsWith(allowedRoot) && !resolved.startsWith(uploadsRoot)) {
+    return res.status(403).json({ error: 'Path not allowed' });
+  }
+  if (!fs.existsSync(resolved)) return res.status(404).json({ error: 'File not found' });
+  try {
+    const content = fs.readFileSync(resolved, 'utf8');
+    const ext = path.extname(resolved).toLowerCase();
+    res.json({ content, path: resolved, ext, size: Buffer.byteLength(content, 'utf8') });
+  } catch (e) {
+    res.status(500).json({ error: 'Cannot read file' });
+  }
+});
+
+app.get('/artifacts', (req, res) => res.sendFile(path.join(__dirname, 'public', 'artifacts.html')));
+
+// ==================== PHASE D: PROJECT HEALTH SCORING ====================
+
+function calculateProjectHealth(projectId, projectHandoffs, projectApprovals) {
+  const now = new Date();
+  const oneWeekAgo = new Date(now - 7 * 24 * 60 * 60 * 1000);
+  const failed = projectHandoffs.filter(h => h.status === 'failed').length;
+  const completed = projectHandoffs.filter(h => h.status === 'completed').length;
+  const pendingApprovals = (projectApprovals || []).length;
+  const stale = projectHandoffs.filter(h => {
+    const d = new Date(h.updatedAt || h.completedAt || h.createdAt);
+    return d < oneWeekAgo && h.status !== 'completed' && h.status !== 'failed';
+  }).length;
+  let score, label;
+  if (failed > 2 || stale > 3)         { score = 0; label = 'blocked'; }
+  else if (pendingApprovals > 0 || stale > 0) { score = 1; label = 'attention'; }
+  else if (completed > 0)              { score = 2; label = 'healthy'; }
+  else                                  { score = 3; label = 'new'; }
+  return { label, score, breakdown: { failed, completed, pendingApprovals, stale, totalHandoffs: projectHandoffs.length } };
+}
+
+app.get('/api/projects/:id/health', (req, res) => {
+  const project = getProjectById(req.params.id);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  const projectHandoffs = Array.from(handoffs.values()).filter(h => h.projectId === project.id);
+  const projectApprovals = (loadTasks().tasks || []).filter(t => t.projectId === project.id && t.column === 'pending_review');
+  const health = calculateProjectHealth(project.id, projectHandoffs, projectApprovals);
+  res.json({ projectId: project.id, name: project.name, health });
+});
+
+// Batch health for all projects
+app.get('/api/projects/health/all', (req, res) => {
+  try {
+    const db = getDb();
+    const projects = db.prepare(`SELECT * FROM projects WHERE status = 'active'`).all();
+    const allTasks = (loadTasks().tasks || []);
+    const result = projects.map(row => {
+      const projectHandoffs = Array.from(handoffs.values()).filter(h => h.projectId === row.id);
+      const projectApprovals = allTasks.filter(t => t.projectId === row.id && t.column === 'pending_review');
+      const health = calculateProjectHealth(row.id, projectHandoffs, projectApprovals);
+      return { projectId: row.id, name: row.name, clientId: row.client_id, health };
+    });
+    res.json({ projects: result });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ==================== PHASE E: RUN SUMMARIES ====================
+
+function saveRunSummary(pipelineId, pipelineHandoffs) {
+  try {
+    const db = getDb();
+    const steps = pipelineHandoffs || Array.from(handoffs.values()).filter(h => h.pipelineId === pipelineId);
+    const projectId = steps[0]?.projectId || null;
+    const client = steps[0]?.client || null;
+    const allApprovals = (loadTasks().tasks || []).filter(t => t.pipelineId === pipelineId && t.column === 'pending_review');
+    const summary = {
+      pipelineId,
+      totalSteps: steps.length,
+      completed: steps.filter(s => s.status === 'completed').length,
+      failed: steps.filter(s => s.status === 'failed').length,
+      artifacts: steps.flatMap(s => s.executionTarget?.artifactPath ? [s.executionTarget.artifactPath] : []),
+      approvalsPending: allApprovals.length,
+      startedAt: steps[0]?.createdAt || null,
+      completedAt: steps[steps.length - 1]?.completedAt || new Date().toISOString(),
+      durationMs: steps[0]?.createdAt ? Date.now() - new Date(steps[0].createdAt).getTime() : null,
+      agents: [...new Set(steps.map(s => s.toAgent))],
+      client,
+      projectId
+    };
+    const id = `summary_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    db.prepare(`INSERT INTO run_summaries (id, project_id, pipeline_id, client, summary_json, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(id, projectId, pipelineId, client, JSON.stringify(summary), new Date().toISOString());
+    console.log(`📋 Run summary saved for pipeline ${pipelineId}`);
+  } catch (e) {
+    console.warn('[RunSummary] Save failed:', e.message);
+  }
+}
+
+app.get('/api/projects/:id/summaries', (req, res) => {
+  try {
+    const project = getProjectById(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    const db = getDb();
+    const rows = db.prepare(`SELECT * FROM run_summaries WHERE project_id = ? ORDER BY created_at DESC`).all(project.id);
+    const summaries = rows.map(r => ({ id: r.id, createdAt: r.created_at, ...JSON.parse(r.summary_json) }));
+    res.json({ projectId: project.id, summaries });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// On-demand pipeline summary generation
+app.post('/api/pipelines/:id/summarize', (req, res) => {
+  const pipelineId = req.params.id;
+  const pipelineHandoffs = Array.from(handoffs.values()).filter(h => h.pipelineId === pipelineId);
+  if (!pipelineHandoffs.length) return res.status(404).json({ error: 'Pipeline not found' });
+  saveRunSummary(pipelineId, pipelineHandoffs);
+  res.json({ ok: true, pipelineId, steps: pipelineHandoffs.length });
+});
+
+// ==================== PHASE F: REVISION LOOP ====================
+
+app.post('/api/approvals/:id/revise', async (req, res) => {
+  try {
+    const { notes, targetPath } = req.body;
+    const data = loadTasks();
+    const approval = (data.tasks || []).find(t => t.id === req.params.id);
+    if (!approval) return res.status(404).json({ error: 'Approval not found' });
+
+    const db = getDb();
+    const existingRevisions = db.prepare(`SELECT COUNT(*) as c FROM approval_revisions WHERE approval_id = ?`).get(approval.id);
+    const revisionCount = (existingRevisions?.c || 0) + 1;
+
+    // Collect prior artifacts
+    const priorHandoffs = Array.from(handoffs.values()).filter(h => h.pipelineId === approval.pipelineId);
+    const priorArtifacts = priorHandoffs.flatMap(h => h.executionTarget?.artifactPath ? [h.executionTarget.artifactPath] : []);
+
+    // Update approval to needs_revision
+    approval.status = 'needs_revision';
+    approval.revisionCount = revisionCount;
+    approval.revisionNotes = notes || '';
+    approval.priorArtifacts = priorArtifacts;
+    approval.updatedAt = new Date().toISOString();
+    saveTasks(data);
+
+    // Re-launch the original pipeline template with revision context
+    const pipelineTemplate = approval.pipelineTemplate || 'research';
+    const revisionContext = `REVISION #${revisionCount}\nNotes: ${notes || 'No notes provided'}\nPrior artifacts: ${priorArtifacts.join(', ') || 'none'}`;
+    let newHandoffId = null;
+
+    if (serviceTemplates.has(pipelineTemplate)) {
+      const svcTemplate = serviceTemplates.get(pipelineTemplate);
+      const launched = await launchTemplatePipeline(svcTemplate, {
+        templateName: pipelineTemplate,
+        task: approval.title || 'Revision task',
+        context: revisionContext,
+        priority: 'high',
+        runAsync: true,
+        targetPath: targetPath || null,
+        client: approval.client,
+        projectId: approval.projectId
+      });
+      newHandoffId = launched.pipelineId;
+    }
+
+    // Log revision
+    const revId = `rev_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    db.prepare(`INSERT INTO approval_revisions (id, approval_id, revision_count, notes, prior_artifacts_json, new_handoff_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(revId, approval.id, revisionCount, notes || '', JSON.stringify(priorArtifacts), newHandoffId, new Date().toISOString());
+
+    logAuditEvent({ eventType: 'approval_revision_requested', entityType: 'task', entityId: approval.id, clientId: approval.client, projectId: approval.projectId, actor: 'chroma', details: { revisionCount, newHandoffId } });
+    res.json({ ok: true, revisionCount, newHandoffId, priorArtifacts });
+  } catch (e) {
+    console.error('[Revise]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/approvals/:id/revisions', (req, res) => {
+  try {
+    const db = getDb();
+    const rows = db.prepare(`SELECT * FROM approval_revisions WHERE approval_id = ? ORDER BY created_at DESC`).all(req.params.id);
+    res.json({ approvalId: req.params.id, revisions: rows.map(r => ({ ...r, priorArtifacts: JSON.parse(r.prior_artifacts_json || '[]') })) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ==================== PHASE G: CLIENT-READY REPORTS ====================
+
+app.get('/client-report/:projectId', (req, res) => res.sendFile(path.join(__dirname, 'public', 'client-report.html')));
+
+app.get('/api/projects/:id/client-summary', (req, res) => {
+  try {
+    const project = getProjectById(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const projectHandoffs = Array.from(handoffs.values()).filter(h => h.projectId === project.id);
+    const completed = projectHandoffs.filter(h => h.status === 'completed').length;
+    const inProgress = projectHandoffs.filter(h => h.status === 'in_progress' || h.status === 'pending').length;
+    const allTasks = (loadTasks().tasks || []).filter(t => t.projectId === project.id);
+    const pendingApprovals = allTasks.filter(t => t.column === 'pending_review').length;
+
+    // Deliverables: artifact files from completed handoffs
+    const deliverables = projectHandoffs
+      .filter(h => h.status === 'completed' && h.executionTarget?.artifactPath)
+      .map(h => ({
+        name: path.basename(h.executionTarget.artifactPath),
+        type: path.extname(h.executionTarget.artifactPath).slice(1) || 'file',
+        completedAt: h.completedAt,
+        agent: h.toAgent
+      }));
+
+    // Get run summaries
+    const db = getDb();
+    const summaryRows = db.prepare(`SELECT summary_json, created_at FROM run_summaries WHERE project_id = ? ORDER BY created_at DESC LIMIT 5`).all(project.id);
+    const recentRuns = summaryRows.map(r => {
+      const s = JSON.parse(r.summary_json);
+      return { completedAt: r.created_at, steps: s.totalSteps, completed: s.completed, durationMs: s.durationMs };
+    });
+
+    res.json({
+      project: { id: project.id, name: project.name, status: project.status, createdAt: project.createdAt },
+      progress: { completed, inProgress, pendingApprovals, total: projectHandoffs.length },
+      deliverables,
+      recentRuns,
+      generatedAt: new Date().toISOString()
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ==================== CONFIG ENDPOINTS ====================
+app.get('/api/config/discord', (req, res) => {
+  res.json({ enabled: !!config.discord?.webhookUrl, webhook: config.discord?.webhookUrl ? '[configured]' : '' });
+});
+
+// ==================== START SERVER ====================
 server.listen(config.port, '0.0.0.0', () => {
   console.log(`🔄 Agent Handoff Manager v2.0 on port ${config.port}`);
-  console.log(`   Dashboard: http://0.0.0.0:${config.port}/api/dashboard`);
+  console.log(`   CRM: http://0.0.0.0:${config.port}/crm`);
   console.log(`   Templates: ${templates.size} loaded`);
   console.log(`   Schedules: ${scheduledJobs.size} active`);
   console.log(`   Webhooks: ${webhooks.size} configured`);

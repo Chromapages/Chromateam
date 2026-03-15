@@ -138,6 +138,7 @@
       <button class="tab-btn active" onclick="switchInnerTab('brands', this)">Brands</button>
       <button class="tab-btn" onclick="switchInnerTab('competitors', this)">Competitors</button>
       <button class="tab-btn" onclick="switchInnerTab('deliverables', this)">Deliverables</button>
+      <button class="tab-btn" onclick="switchInnerTab('assets', this)">Assets</button>
       <button class="tab-btn" onclick="switchInnerTab('ledger', this)">Ledger</button>
     </div>
 
@@ -225,6 +226,18 @@
           </div>
         </div>
 
+        <!-- TAB: ASSETS -->
+        <div id="inner-assets" style="display:none;">
+          <div class="section-hd">
+            <span class="section-hd-label">Project Assets</span>
+            <span class="section-hd-rule"></span>
+            <button onclick="loadArtifacts()" class="btn btn-ghost btn-sm">↻ Refresh</button>
+          </div>
+          <div id="assetsGrid" class="deliv-grid" style="margin-top:.5rem;">
+            <div class="empty-state">Select a project to view its artifacts</div>
+          </div>
+        </div>
+
         <!-- TAB: LEDGER -->
         <div id="inner-ledger" style="display:none;">
           <div class="section-hd">
@@ -277,7 +290,8 @@
           <option value="">Select project...</option>
         </select>
         <label class="field-label">Campaign Type</label>
-        <select id="campaignType" class="field" required>
+        <select id="campaignType" class="field" onchange="onCampaignTypeChange()" required>
+          <option value="">Custom...</option>
           <option value="ad_creative">Ad Creative</option>
           <option value="email_sequence">Email Sequence</option>
           <option value="landing_page">Landing Page</option>
@@ -285,6 +299,14 @@
           <option value="video_ad">Video Ad</option>
           <option value="brand_design">Brand Design</option>
         </select>
+        <div id="templateButtons" style="display:flex;flex-wrap:wrap;gap:.25rem;margin-top:.25rem;">
+          <button type="button" class="btn btn-ghost btn-sm" style="font-size:9px" onclick="applyTemplate('unt_tax_ads')">UNT Tax</button>
+          <button type="button" class="btn btn-ghost btn-sm" style="font-size:9px" onclick="applyTemplate('buddhas_launch')">Buddha's</button>
+          <button type="button" class="btn btn-ghost btn-sm" style="font-size:9px" onclick="applyTemplate('email_nurture')">Email Nurture</button>
+          <button type="button" class="btn btn-ghost btn-sm" style="font-size:9px" onclick="applyTemplate('landing_page')">Landing Page</button>
+          <button type="button" class="btn btn-ghost btn-sm" style="font-size:9px" onclick="applyTemplate('social_content')">Social Pack</button>
+          <button type="button" class="btn btn-ghost btn-sm" style="font-size:9px" onclick="applyTemplate('competitor_research')">Competitor</button>
+        </div>
         <label class="field-label">Task Description</label>
         <textarea id="campaignTask" class="field" rows="3" style="resize:none" placeholder="What do you need created? (e.g., 'Create 5 ad variations for UNT tax services targeting small business owners')" required></textarea>
         <label class="field-label">Context / Constraints</label>
@@ -729,16 +751,167 @@
       }
     });
 
+    // ── M4: Assets Tab ──
+    async function loadArtifacts() {
+      const projectId = document.getElementById('projectSelect').value;
+      const grid = document.getElementById('assetsGrid');
+      
+      if (!projectId) {
+        grid.innerHTML = '<div class="empty-state">Select a project above to view its artifacts</div>';
+        return;
+      }
+      
+      try {
+        const res = await fetch(`/api/projects/${projectId}/details`);
+        const data = await res.json();
+        const artifacts = data.artifacts || [];
+        
+        if (artifacts.length === 0) {
+          grid.innerHTML = '<div class="empty-state">No artifacts yet. Run a campaign to generate assets.</div>';
+          return;
+        }
+        
+        grid.innerHTML = artifacts.map(a => {
+          const isImage = a.path.match(/\.(jpg|jpeg|png|gif|webp|svg)$/i);
+          const isCode = a.path.match(/\.(js|ts|py|html|css|json|md)$/i);
+          const type = isImage ? '🖼️' : isCode ? '📄' : '📦';
+          return `
+            <div class="deliv-card">
+              <div style="display:flex;align-items:center;gap:.5rem;">
+                <span style="font-size:20px">${type}</span>
+                <div>
+                  <div style="font-family:var(--font-mono);font-size:11px;font-weight:700;color:var(--text-primary)">${a.task?.substring(0,30) || 'artifact'}</div>
+                  <div style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted)">${a.agent} • ${a.path.split('/').pop()}</div>
+                </div>
+              </div>
+              <div class="deliv-content">${a.path}</div>
+              <div style="display:flex;gap:.5rem;">
+                <button class="btn btn-sm" onclick="previewArtifact('${a.handoffId}', '${encodeURIComponent(a.path)}')">👁 Preview</button>
+                <button class="btn btn-sm" onclick="copyPath('${a.path}')">📋 Copy</button>
+              </div>
+            </div>`;
+        }).join('');
+      } catch (e) {
+        console.error('Failed to load artifacts:', e);
+        grid.innerHTML = '<div class="empty-state">Error loading artifacts</div>';
+      }
+    }
+    
+    async function previewArtifact(handoffId, relPath) {
+      try {
+        const res = await fetch(`/api/handoff/${handoffId}/artifact-preview?path=${relPath}`);
+        const data = await res.json();
+        if (data.content) {
+          const drawer = document.getElementById('previewDrawer');
+          const content = document.getElementById('drawerContent');
+          content.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1.5rem;">
+              <div>
+                <div style="font-family:var(--font-mono);font-size:8px;color:var(--text-muted);text-transform:uppercase;margin-bottom:.375rem">Artifact Preview</div>
+                <div style="font-family:var(--font-mono);font-size:14px;font-weight:700;color:var(--text-primary)">${data.path}</div>
+              </div>
+              <button onclick="closeDrawer()" class="btn btn-ghost btn-icon">✕</button>
+            </div>
+            <div style="background:var(--surface-2);border:1px solid var(--rule);padding:1rem;font-family:var(--font-mono);font-size:11px;line-height:1.6;color:var(--text-secondary);white-space:pre-wrap;max-height:60vh;overflow-y:auto;">${data.content.slice(0,10000)}${data.truncated ? '\n\n[...] (truncated)' : ''}</div>`;
+          drawer.classList.add('open');
+          document.getElementById('drawerOverlay').classList.add('show');
+        } else {
+          alert('No preview available');
+        }
+      } catch (e) {
+        alert('Error: ' + e.message);
+      }
+    }
+    
+    function copyPath(p) {
+      navigator.clipboard.writeText(p).then(() => alert('Path copied!'));
+    }
+
+    // ── M5: Discord Notification Settings ──
+    let discordEnabled = false;
+    let discordWebhook = '';
+    
+    async function loadDiscordSettings() {
+      try {
+        const res = await fetch('/api/config/discord');
+        const data = await res.json();
+        discordEnabled = data.enabled || false;
+        discordWebhook = data.webhook || '';
+      } catch (e) { console.log('No Discord config'); }
+    }
+    
+    async function sendDiscordNotification(type, message) {
+      if (!discordEnabled || !discordWebhook) return;
+      try {
+        await fetch(discordWebhook, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: message })
+        });
+      } catch (e) { console.error('Discord notification failed:', e); }
+    }
+
+    // ── M6: Campaign Templates ──
+    const CAMPAIGN_TEMPLATES = {
+      unt_tax_ads: {
+        name: 'UNT Tax Services Ad Campaign',
+        task: 'Create 5 ad variations for UNT tax services targeting small business owners, 45+ demographic',
+        context: 'Professional, trustworthy tone. Highlight year-round tax support and SMB expertise.'
+      },
+      buddhas_launch: {
+        name: "Buddha's Grand Opening",
+        task: 'Create complete brand package: logo redesign, menu design, signage concepts, and promotional video',
+        context: 'Family-friendly, warm atmosphere. Local restaurant targeting families and professionals.'
+      },
+      email_nurture: {
+        name: 'Email Nurture Sequence',
+        task: 'Write 5-email nurture sequence for [CLIENT] following up with warm leads',
+        context: 'Personal tone, value-first. No hard sells in first 3 emails.'
+      },
+      landing_page: {
+        name: 'Landing Page',
+        task: 'Build and design landing page for [CLIENT] service offering',
+        context: 'Clean, conversion-focused. Above the fold: headline, CTA, trust badges.'
+      },
+      social_content: {
+        name: 'Social Media Content Pack',
+        task: 'Create 10 social media posts (copy + suggestions) for [CLIENT]',
+        context: 'Mix of educational, promotional, and engagement content. Hashtags included.'
+      },
+      competitor_research: {
+        name: 'Competitor Research',
+        task: 'Research top 5 competitors for [CLIENT] in [NICHE], document strengths, weaknesses, positioning gaps',
+        context: 'Focus on marketing strategies, pricing, and market positioning.'
+      }
+    };
+    
+    function applyTemplate(templateKey) {
+      const t = CAMPAIGN_TEMPLATES[templateKey];
+      if (t) {
+        document.getElementById('campaignTask').value = t.task;
+        document.getElementById('campaignContext').value = t.context;
+      }
+    }
+
     // ── Init ──
     document.addEventListener('DOMContentLoaded', () => {
       connectWebSocket();
       loadProjects();
       loadApprovals();
+      loadDiscordSettings();
       loadBrands();
       loadCompetitors();
       loadDeliverables();
       loadActivity();
       loadLedger();
+      // Update artifact view when project changes
+      document.getElementById('projectSelect').addEventListener('change', () => {
+        onProjectChange();
+        // Auto-load artifacts if on assets tab
+        if (document.getElementById('inner-assets').style.display !== 'none') {
+          loadArtifacts();
+        }
+      });
       setInterval(loadActivity, 10000);
       setInterval(loadLedger, 30000);
       setInterval(loadApprovals, 30000);
