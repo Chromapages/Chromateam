@@ -2030,12 +2030,19 @@ app.get('/api/projects/:id/details', (req, res) => {
   const project = getProjectById(req.params.id);
   if (!project) return res.status(404).json({ error: 'Project not found' });
 
+  let clientProjects = [];
+  try {
+    const db = getDb();
+    clientProjects = db.prepare('SELECT id FROM projects WHERE client_id = ?').all(project.clientId);
+  } catch {}
+  const singleProjectClient = clientProjects.length <= 1;
+
   const projectHandoffs = Array.from(handoffs.values())
-    .filter(h => h.projectId === project.id)
+    .filter(h => h.projectId === project.id || (!h.projectId && singleProjectClient && h.client === project.clientId))
     .sort((a,b) => new Date(b.completedAt || b.responseAt || b.startedAt || b.createdAt) - new Date(a.completedAt || a.responseAt || a.startedAt || a.createdAt));
-  const projectTasks = (loadTasks().tasks || []).filter(t => t.projectId === project.id || t.client === project.clientId);
+  const projectTasks = (loadTasks().tasks || []).filter(t => t.projectId === project.id || (!t.projectId && singleProjectClient && t.client === project.clientId));
   const approvals = projectTasks.filter(t => t.column === 'pending_review' || t.approvalStatus === 'needs_revision');
-  const artifacts = projectHandoffs.flatMap(h => (h.artifacts || []).map(a => ({ handoffId: h.id, path: a, task: h.task, agent: h.toAgent, finalOutcome: h.finalOutcome || null })));
+  const artifacts = projectHandoffs.flatMap(h => (h.artifacts || []).map(a => ({ handoffId: h.id, path: a, task: h.task, agent: h.toAgent, finalOutcome: h.finalOutcome || null, legacyLinked: !h.projectId })));
   const pipelines = [...new Set(projectHandoffs.map(h => h.pipelineId).filter(Boolean))].map(id => ({
     id,
     steps: projectHandoffs.filter(h => h.pipelineId === id).length,
@@ -2047,9 +2054,10 @@ app.get('/api/projects/:id/details', (req, res) => {
     failed: projectHandoffs.filter(h => h.status === 'failed').length,
     approvalsPending: approvals.length,
     artifacts: artifacts.length,
+    legacyLinkedRuns: projectHandoffs.filter(h => !h.projectId && h.client === project.clientId).length,
   };
 
-  res.json({ project, handoffs: projectHandoffs, tasks: projectTasks, approvals, artifacts, pipelines, performance });
+  res.json({ project, handoffs: projectHandoffs, tasks: projectTasks, approvals, artifacts, pipelines, performance, singleProjectClient });
 });
 
 app.post('/api/projects', (req, res) => {
@@ -4149,6 +4157,22 @@ app.get('/api/handoff/:id/deliverables', (req, res) => {
     workdir: executionTarget.workdir,
     targetPath: executionTarget.targetPath
   });
+});
+
+app.get('/api/handoff/:id/artifact-preview', (req, res) => {
+  const { id } = req.params;
+  const relPath = req.query.path;
+  const handoff = handoffs.get(id);
+  if (!handoff) return res.status(404).json({ error: 'Handoff not found' });
+  const outputPaths = getArtifactSearchPaths(handoff);
+  for (const outputPath of outputPaths) {
+    const fullPath = relPath ? path.resolve(outputPath, relPath) : null;
+    if (fullPath && fullPath.startsWith(path.resolve(outputPath)) && fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
+      const content = fs.readFileSync(fullPath, 'utf8');
+      return res.json({ handoffId: id, path: relPath, fullPath, content: content.slice(0, 20000), truncated: content.length > 20000 });
+    }
+  }
+  res.status(404).json({ error: 'Artifact not found' });
 });
 
 // Serve pipeline output files
