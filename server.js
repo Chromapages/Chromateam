@@ -2091,6 +2091,44 @@ app.get('/api/persistence/status', (req, res) => {
   }
 });
 
+app.post('/api/persistence/backup', (req, res) => {
+  try {
+    ensureDataDir();
+    const stamp = new Date().toISOString().replace(/[:.]/g,'-');
+    const backupDir = path.join(__dirname, 'data', 'backups');
+    if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+    const dbBackup = path.join(backupDir, `ahm-${stamp}.sqlite`);
+    fs.copyFileSync(SQLITE_DB_FILE, dbBackup);
+    const jsonBackup = path.join(backupDir, `handoffs-${stamp}.json`);
+    fs.writeFileSync(jsonBackup, JSON.stringify(Array.from(handoffs.values()), null, 2));
+    logAuditEvent({ eventType: 'backup_created', entityType: 'system', entityId: stamp, actor: 'chroma', details: { dbBackup, jsonBackup } });
+    res.json({ success: true, dbBackup, jsonBackup });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/smoke', (req, res) => {
+  try {
+    const db = getDb();
+    const smoke = {
+      server: 'ok',
+      sqlite: fs.existsSync(SQLITE_DB_FILE),
+      handoffCount: db.prepare('SELECT COUNT(*) as count FROM handoffs').get().count,
+      taskCount: db.prepare('SELECT COUNT(*) as count FROM tasks').get().count,
+      projectCount: db.prepare('SELECT COUNT(*) as count FROM projects').get().count,
+      serviceTemplates: serviceTemplates.size,
+      approvals: (loadTasks().tasks || []).filter(t => t.column === 'pending_review').length,
+      recentFailedHandoffs: Array.from(handoffs.values()).filter(h => h.status === 'failed').slice(0,5).map(h => ({ id: h.id, task: h.task, error: h.error || h.failureReason || null })),
+      ok: true,
+      checkedAt: new Date().toISOString(),
+    };
+    res.json(smoke);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message, checkedAt: new Date().toISOString() });
+  }
+});
+
 app.get('/api/ops/overview', (req, res) => {
   const { client } = req.query;
   const allHandoffs = Array.from(handoffs.values()).filter(h => !client || h.client === client);
@@ -2519,14 +2557,16 @@ app.get('/api/pipeline/:id', (req, res) => {
 // API: Cancel pipeline
 app.post('/api/pipeline/:id/cancel', (req, res) => {
   const { id } = req.params;
-  const pipelineHandoffs = Array.from(handoffs.values()).filter(h => h.pipelineId === id && h.status === 'pending');
+  const pipelineHandoffs = Array.from(handoffs.values()).filter(h => h.pipelineId === id && (h.status === 'pending' || h.status === 'in_progress'));
 
   let cancelled = 0;
   for (const h of pipelineHandoffs) {
     h.status = 'cancelled';
+    h.cancelledAt = new Date().toISOString();
     cancelled++;
   }
-
+  saveHandoffs();
+  logAuditEvent({ eventType: 'pipeline_cancelled', entityType: 'pipeline', entityId: id, actor: 'chroma', details: { cancelled } });
   res.json({ success: true, cancelled });
 });
 
@@ -3871,29 +3911,44 @@ The previous step completed with the above result. Use this information to compl
   });
 });
 
-// Cancel a pending handoff
+// Cancel a pending/in-progress handoff
 app.post('/api/handoff/:id/cancel', (req, res) => {
   const { id } = req.params;
   const handoff = handoffs.get(id);
 
   if (!handoff) return res.status(404).json({ error: 'Handoff not found' });
 
-  // Only allow canceling pending handoffs
-  if (handoff.status !== 'pending') {
+  if (!['pending','in_progress'].includes(handoff.status)) {
     return res.status(400).json({ error: `Cannot cancel handoff with status: ${handoff.status}` });
   }
 
-  // Mark as cancelled (remove from map)
-  handoffs.delete(id);
+  handoff.status = 'cancelled';
+  handoff.cancelledAt = new Date().toISOString();
+  saveHandoffs();
+  logAuditEvent({ eventType: 'handoff_cancelled', entityType: 'handoff', entityId: id, clientId: handoff.client || null, projectId: handoff.projectId || null, actor: 'chroma', details: { task: handoff.task, toAgent: handoff.toAgent } });
 
   console.log(`🚫 Cancelled: ${handoff.fromAgent} → ${handoff.toAgent}: ${handoff.task?.substring(0, 50)}`);
 
-  // Broadcast to WebSocket clients
   if (typeof global.broadcastHandoffUpdate === 'function') {
-    global.broadcastHandoffUpdate('cancelled', { ...handoff, status: 'cancelled' });
+    global.broadcastHandoffUpdate('cancelled', handoff);
   }
 
   res.json({ success: true, message: 'Handoff cancelled', handoffId: id });
+});
+
+app.post('/api/handoff/:id/retry', async (req, res) => {
+  const { id } = req.params;
+  const handoff = handoffs.get(id);
+  if (!handoff) return res.status(404).json({ error: 'Handoff not found' });
+  handoff.status = 'pending';
+  handoff.error = null;
+  handoff.failureReason = null;
+  handoff.retryMeta = handoff.retryMeta || { attempts: 0, history: [] };
+  handoff.retryMeta.manualRetryAt = new Date().toISOString();
+  saveHandoffs();
+  logAuditEvent({ eventType: 'handoff_manual_retry', entityType: 'handoff', entityId: id, clientId: handoff.client || null, projectId: handoff.projectId || null, actor: 'chroma', details: { task: handoff.task, toAgent: handoff.toAgent } });
+  processHandoff(handoff);
+  res.json({ success: true, handoffId: id });
 });
 
 // ==================== DASHBOARD ====================
